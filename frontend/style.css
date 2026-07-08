@@ -1,4 +1,19 @@
-/* Reset basic spacing */
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+    --page: #EFE7D8;
+    --card: #FBF6EC;
+    --ink: #22262B;
+    --wire: #2F5C82;
+    --stamp: #A6362C;
+    --line: #CBBFA4;
+    --muted: #8A8271;
+
+    --font-display: 'Roboto Slab', serif;
+    --font-body: 'IBM Plex Sans', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -6,87 +21,221 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background-color: #f4f6f9;
-    color: #333;
-    display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    font-family: var(--font-body);
+    color: var(--ink);
+    background:
+        radial-gradient(circle at 50% 0%, rgba(0, 0, 0, 0.04), transparent 60%),
+        repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.015) 0 2px, transparent 2px 6px),
+        var(--page);
 }
 
-/* Center application container */
 #app {
     width: 100%;
     max-width: 400px;
-    padding: 20px;
 }
 
-/* Auth box card styling */
+/* Ticket card */
 .auth-container {
-    background: #ffffff;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    position: relative;
+    background: var(--card);
+    padding: 46px 34px 34px;
     text-align: center;
+    box-shadow: 0 18px 40px -14px rgba(34, 38, 43, 0.3);
+    overflow: visible;
+}
+
+/* Perforated tear-off edge along the top */
+.auth-container::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 12px;
+    right: 12px;
+    height: 12px;
+    background-image: radial-gradient(circle at center, var(--page) 0 4px, transparent 4.5px);
+    background-size: 20px 12px;
+    background-repeat: repeat-x;
+    background-position: top center;
+}
+
+/* Rotated ink stamp — the signature element */
+.auth-container::after {
+    content: "LIVE\A TRANSMISSION";
+    white-space: pre;
+    position: absolute;
+    top: -16px;
+    right: -12px;
+    width: 96px;
+    padding: 9px 4px;
+    border: 2px solid var(--stamp);
+    border-radius: 50% / 42%;
+    transform: rotate(-14deg);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1.5;
+    color: var(--stamp);
+    mix-blend-mode: multiply;
+    opacity: 0.85;
+    pointer-events: none;
 }
 
 .auth-container h2 {
-    margin-bottom: 20px;
-    color: #111;
+    display: inline-block;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 26px;
+    color: var(--ink);
+    margin-bottom: 28px;
 }
 
-/* Input fields layout */
+.auth-container h2::after {
+    content: "";
+    display: block;
+    width: 64px;
+    height: 2px;
+    margin: 12px auto 0;
+    background-image: repeating-linear-gradient(90deg, var(--wire) 0 6px, transparent 6px 10px);
+    animation: pulse-line 3s linear infinite;
+}
+
+@keyframes pulse-line {
+    to { background-position: 32px 0; }
+}
+
+/* Fields: underline style, no boxes */
 input, select {
     width: 100%;
-    padding: 12px;
-    margin-bottom: 15px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 14px;
-    background-color: #fff;
+    border: none;
+    border-bottom: 2px solid var(--line);
+    background: transparent;
+    padding: 10px 2px 9px;
+    margin-bottom: 22px;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--ink);
+    border-radius: 0;
+    transition: border-color 0.2s ease;
+}
+
+input::placeholder {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: left;
+    color: var(--ink);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%232F5C82'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 4px center;
+    padding-right: 20px;
+}
+
+select:invalid {
+    color: var(--muted);
 }
 
 input:focus, select:focus {
-    border-color: #007bff;
     outline: none;
+    border-color: var(--wire);
 }
 
-/* Submit Buttons */
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--wire);
+    outline-offset: 2px;
+}
+
+/* Stamp-press button */
 button {
     width: 100%;
-    padding: 12px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 16px;
-    font-weight: bold;
+    padding: 14px;
+    margin-top: 6px;
+    background: var(--ink);
+    color: var(--card);
+    border: 2px solid var(--ink);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
     cursor: pointer;
-    transition: background 0.2s ease;
+    box-shadow: 4px 4px 0 var(--wire);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease, border-color 0.2s ease;
 }
 
 button:hover {
-    background-color: #0056b3;
+    background: var(--wire);
+    border-color: var(--wire);
+    box-shadow: 4px 4px 0 var(--ink);
 }
 
-/* Helper text & links */
+button:active {
+    transform: translate(4px, 4px);
+    box-shadow: 0 0 0 var(--ink);
+}
+
 p {
-    margin-top: 15px;
-    font-size: 14px;
+    margin-top: 18px;
+    font-size: 13px;
+    color: var(--muted);
 }
 
 a {
-    color: #007bff;
+    color: var(--wire);
     text-decoration: none;
+    border-bottom: 1px dashed var(--wire);
+    padding-bottom: 1px;
 }
 
 a:hover {
-    text-decoration: underline;
+    color: var(--ink);
+    border-bottom-style: solid;
 }
 
-/* Dynamic error paragraph */
+/* Error line — only takes space when it has content */
 #login-error, #reg-error {
-    font-weight: 500;
-    margin-top: 10px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--stamp);
+    border-left: 3px solid var(--stamp);
+    padding-left: 8px;
+    margin-top: 4px;
+}
+
+#login-error:empty, #reg-error:empty {
+    border-left: none;
+    padding-left: 0;
+    margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .auth-container h2::after {
+        animation: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .auth-container {
+        padding: 40px 22px 26px;
+    }
+
+    .auth-container::after {
+        transform: rotate(-14deg) scale(0.85);
+        top: -12px;
+        right: -8px;
+    }
 }
