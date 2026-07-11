@@ -37,7 +37,7 @@ export function renderLogin(app, navigateTo) {
             });
 
             if (response.ok) {
-                alert("Login successful! Welcome to the forum.");
+                navigateTo("feed");
             } else {
                 const errText = await response.text();
                 errorField.textContent = errText;

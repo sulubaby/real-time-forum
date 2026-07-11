@@ -190,6 +190,29 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, "Login successful")
 }
 
+func LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cookie, err := r.Cookie("forum_session")
+	if err == nil {
+		database.DB.Exec(`DELETE FROM sessions WHERE session_token = ?`, cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "forum_session",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		Path:     "/",
+		HttpOnly: true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out"})
+}
+
 func GetUserFromSession(r *http.Request) (int, bool) {
 	cookie, err := r.Cookie("forum_session")
 	if err != nil {
