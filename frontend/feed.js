@@ -350,7 +350,7 @@ export async function renderFeed(app, navigateTo) {
     app.innerHTML = `
         <div class="app-layout">
             <header class="app-header">
-                <h1 class="app-title">REAL-TIME FORUM</h1>
+                <h1 class="app-title">SULU-TIME-FORUM</h1>
                 <div class="user-info">
                     <span class="user-nickname">${escapeHtml(currentUser.nickname)}</span>
                     <button id="logout-btn" class="btn-logout">LOGOUT</button>
