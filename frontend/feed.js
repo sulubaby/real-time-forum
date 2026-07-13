@@ -1,9 +1,12 @@
 import { api } from "./api.js";
+import { connectSocket, onSocketMessage } from "./ws.js";
 
 let currentUser = null;
 let allCategories = [];
 let activeFilterCategories = [];
 let users = [];
+let socketHandlersRegistered = false;
+let globalListenersBound = false;
 
 function escapeHtml(text) {
     const div = document.createElement("div");
@@ -13,7 +16,7 @@ function escapeHtml(text) {
 
 function formatDate(dateStr) {
     if (!dateStr) return "";
-    const d = new Date(dateStr);
+    const d = new Date(dateStr.replace(" ", "T"));
     return d.toLocaleString(undefined, {
         year: "numeric", month: "short", day: "numeric",
         hour: "2-digit", minute: "2-digit"
@@ -22,7 +25,7 @@ function formatDate(dateStr) {
 
 function formatRelativeDate(dateStr) {
     if (!dateStr) return "";
-    const d = new Date(dateStr);
+    const d = new Date(dateStr.replace(" ", "T"));
     const now = new Date();
     const diff = now - d;
     const days = Math.floor(diff / 86400000);
@@ -78,7 +81,7 @@ function createCommentHTML(comment) {
     const dislikeActive = comment.userReaction === "dislike" ? " reaction-active" : "";
 
     return `
-        <div class="comment">
+        <div class="comment" data-comment-id="${comment.id}">
             <div class="comment-header">
                 <span class="comment-author">${escapeHtml(comment.author)}</span>
                 <span class="comment-date">${formatDate(comment.createdAt)}</span>
@@ -148,6 +151,10 @@ function createUserItem(user) {
 async function loadUsers() {
     try {
         users = await api.getUsers();
+        if (currentUser) {
+            const selfIdx = users.findIndex(u => u.id === currentUser.id);
+            if (selfIdx > -1) users[selfIdx].online = true;
+        }
         renderUserList();
     } catch {
         console.error("Failed to load users");
@@ -333,6 +340,77 @@ async function handleReaction(e) {
     }
 }
 
+
+function addNewPostFromSocket(post) {
+    const container = document.getElementById("posts-container");
+    if (!container) return;
+
+    if (document.querySelector(`.post-card[data-post-id="${post.id}"]`)) return;
+
+    if (activeFilterCategories.length > 0) {
+        const matches = (post.categoryIds || []).some(id => activeFilterCategories.includes(id));
+        if (!matches) return;
+    }
+
+    const categories = allCategories.filter(c => (post.categoryIds || []).includes(c.id));
+    const fullPost = { ...post, categories };
+
+    const emptyMsg = container.querySelector(".empty-feed");
+    if (emptyMsg) container.innerHTML = "";
+
+    container.insertAdjacentHTML("afterbegin", createPostHTML(fullPost));
+}
+
+function addNewCommentFromSocket(comment) {
+    const postCard = document.querySelector(`.post-card[data-post-id="${comment.postId}"]`);
+    if (postCard) {
+        const countEl = postCard.querySelector(".post-comments-count");
+        if (countEl) {
+            const current = parseInt(countEl.textContent) || 0;
+            countEl.textContent = (current + 1) + " comments";
+        }
+    }
+
+    const commentsDiv = document.getElementById("comments-" + comment.postId);
+    if (!commentsDiv || !commentsDiv.dataset.loaded) return;
+
+    if (document.querySelector(`.comment[data-comment-id="${comment.id}"]`)) return;
+
+    const list = document.getElementById("comments-list-" + comment.postId);
+    if (!list) return;
+
+    const emptyMsg = list.querySelector(".empty-comments");
+    if (emptyMsg) list.innerHTML = "";
+
+    list.insertAdjacentHTML("beforeend", createCommentHTML(comment));
+}
+
+function updateReactionCountsFromSocket(data) {
+    const { targetType, targetId, likeCount, dislikeCount } = data;
+
+    const selector = targetType === "post"
+        ? `.post-card[data-post-id="${targetId}"] .post-reactions`
+        : `.comment[data-comment-id="${targetId}"] .comment-reactions`;
+
+    const container = document.querySelector(selector);
+    if (!container) return;
+
+    const likeBtn = container.querySelector('[data-reaction="like"]');
+    const dislikeBtn = container.querySelector('[data-reaction="dislike"]');
+    if (likeBtn) likeBtn.textContent = "+" + likeCount;
+    if (dislikeBtn) dislikeBtn.textContent = "-" + dislikeCount;
+}
+
+function updateUserOnlineStatus(userId, online) {
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx > -1) {
+        users[idx].online = online;
+        renderUserList();
+    } else {
+        loadUsers();
+    }
+}
+
 export async function renderFeed(app, navigateTo) {
     try {
         currentUser = await api.getMe();
@@ -390,7 +468,7 @@ export async function renderFeed(app, navigateTo) {
 
     document.getElementById("logout-btn").addEventListener("click", async () => {
         try { await api.logout(); } catch {}
-        navigateTo("login");
+        window.location.reload();
     });
 
     document.getElementById("create-post-toggle").addEventListener("click", () => {
@@ -410,6 +488,8 @@ export async function renderFeed(app, navigateTo) {
         if (e.key === "Enter" && e.ctrlKey) submitPost();
     });
 
+    connectSocket();
+
     renderCategoryFilter();
     loadPosts();
     loadUsers();
@@ -423,12 +503,24 @@ export async function renderFeed(app, navigateTo) {
         togglePost(postId);
     });
 
-    document.addEventListener("click", (e) => {
-        const btn = e.target.closest(".btn-comment");
-        if (!btn) return;
-        const postId = parseInt(btn.dataset.postId);
-        submitComment(postId);
-    });
+    if (!globalListenersBound) {
+        document.addEventListener("click", (e) => {
+            const btn = e.target.closest(".btn-comment");
+            if (!btn) return;
+            const postId = parseInt(btn.dataset.postId);
+            submitComment(postId);
+        });
 
-    document.addEventListener("click", handleReaction);
+        document.addEventListener("click", handleReaction);
+        globalListenersBound = true;
+    }
+
+    if (!socketHandlersRegistered) {
+        onSocketMessage("new_post", addNewPostFromSocket);
+        onSocketMessage("new_comment", addNewCommentFromSocket);
+        onSocketMessage("reaction_update", updateReactionCountsFromSocket);
+        onSocketMessage("user_online", (data) => updateUserOnlineStatus(data.userId, true));
+        onSocketMessage("user_offline", (data) => updateUserOnlineStatus(data.userId, false));
+        socketHandlersRegistered = true;
+    }
 }

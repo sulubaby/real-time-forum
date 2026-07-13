@@ -31,6 +31,7 @@ func main() {
 	http.HandleFunc("/api/comments", handlers.AuthMiddleware(handlers.CommentsHandler))
 	http.HandleFunc("/api/users", handlers.AuthMiddleware(handlers.GetUsersHandler))
 	http.HandleFunc("/api/reactions", handlers.AuthMiddleware(handlers.ToggleReactionHandler))
+	http.HandleFunc("/ws", handlers.WebSocketHandler)
 
 	fmt.Println("Server is running smoothly on http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)

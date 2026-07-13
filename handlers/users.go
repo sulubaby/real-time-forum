@@ -41,6 +41,11 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&u.ID, &u.Nickname, &u.LastMessage); err != nil {
 			continue
 		}
+
+		clientsMu.Lock()
+		_, u.Online = clients[u.ID]
+		clientsMu.Unlock()
+
 		users = append(users, u)
 	}
 

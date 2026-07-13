@@ -6,6 +6,7 @@ import (
 	"real/database"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type CreateCommentRequest struct {
@@ -44,7 +45,7 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := database.DB.Exec(
+	result, err := database.DB.Exec(
 		`INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)`,
 		req.PostID, userID, req.Content,
 	)
@@ -52,6 +53,27 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	commentID, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var nickname string
+	database.DB.QueryRow(`SELECT nickname FROM users WHERE id = ?`, userID).Scan(&nickname)
+
+	Broadcast("new_comment", map[string]interface{}{
+		"id":           commentID,
+		"postId":       req.PostID,
+		"userId":       userID,
+		"author":       nickname,
+		"content":      req.Content,
+		"createdAt":    time.Now().Format("2006-01-02 15:04:05"),
+		"likeCount":    0,
+		"dislikeCount": 0,
+		"userReaction": "",
+	})
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Comment created"})

@@ -50,28 +50,43 @@ func ToggleReactionHandler(w http.ResponseWriter, r *http.Request) {
 		req.TargetID, userID,
 	).Scan(&existingType)
 
+	var action string
+
 	if err == nil {
 		if existingType == req.ReactionType {
 			database.DB.Exec("DELETE FROM "+table+" WHERE "+idCol+" = ? AND user_id = ?", req.TargetID, userID)
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"action": "removed"})
+			action = "removed"
+		} else {
+			database.DB.Exec("UPDATE "+table+" SET reaction_type = ? WHERE "+idCol+" = ? AND user_id = ?", req.ReactionType, req.TargetID, userID)
+			action = "updated"
+		}
+	} else {
+		_, err = database.DB.Exec(
+			"INSERT INTO "+table+" ("+idCol+", user_id, reaction_type) VALUES (?, ?, ?)",
+			req.TargetID, userID, req.ReactionType,
+		)
+		if err != nil {
+			http.Error(w, "Failed to add reaction", http.StatusInternalServerError)
 			return
 		}
-		database.DB.Exec("UPDATE "+table+" SET reaction_type = ? WHERE "+idCol+" = ? AND user_id = ?", req.ReactionType, req.TargetID, userID)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"action": "updated"})
-		return
+		action = "created"
 	}
 
-	_, err = database.DB.Exec(
-		"INSERT INTO "+table+" ("+idCol+", user_id, reaction_type) VALUES (?, ?, ?)",
-		req.TargetID, userID, req.ReactionType,
-	)
-	if err != nil {
-		http.Error(w, "Failed to add reaction", http.StatusInternalServerError)
-		return
-	}
+	var likeCount, dislikeCount int
+	database.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+idCol+" = ? AND reaction_type = 'like'", req.TargetID).Scan(&likeCount)
+	database.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+idCol+" = ? AND reaction_type = 'dislike'", req.TargetID).Scan(&dislikeCount)
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"action": "created"})
+	Broadcast("reaction_update", map[string]interface{}{
+		"targetType":   req.TargetType,
+		"targetId":     req.TargetID,
+		"likeCount":    likeCount,
+		"dislikeCount": dislikeCount,
+	})
+
+	status := http.StatusOK
+	if action == "created" {
+		status = http.StatusCreated
+	}
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"action": action})
 }
