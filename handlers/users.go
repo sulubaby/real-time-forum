@@ -19,16 +19,19 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	currentUser := r.Context().Value(UserIDKey).(int)
 	rows, err := database.DB.Query(`
 		SELECT u.id, u.nickname,
 			COALESCE((SELECT MAX(created_at) FROM messages
-				WHERE sender_id = u.id OR receiver_id = u.id), '') as last_message
+				WHERE (sender_id = ? AND receiver_id = u.id)
+				   OR (sender_id = u.id AND receiver_id = ?)), '') as last_message
 		FROM users u
+		WHERE u.id != ?
 		ORDER BY
 			CASE WHEN last_message != '' THEN 0 ELSE 1 END,
 			last_message DESC,
 			u.nickname ASC
-	`)
+	`, currentUser, currentUser, currentUser)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -42,9 +45,9 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		clientsMu.Lock()
+		clientsMu.RLock()
 		_, u.Online = clients[u.ID]
-		clientsMu.Unlock()
+		clientsMu.RUnlock()
 
 		users = append(users, u)
 	}

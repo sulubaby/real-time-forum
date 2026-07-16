@@ -38,4 +38,8 @@ export const api = {
     toggleReaction: (data) => apiRequest("POST", "/api/reactions", data),
     logout: () => apiRequest("POST", "/api/logout"),
     getUsers: () => apiRequest("GET", "/api/users"),
+    getMessages: (userId, beforeId = 0) => apiRequest(
+        "GET",
+        `/api/messages?user_id=${encodeURIComponent(userId)}${beforeId ? `&before_id=${encodeURIComponent(beforeId)}` : ""}`
+    ),
 };

@@ -1,526 +1,415 @@
 import { api } from "./api.js";
-import { connectSocket, onSocketMessage } from "./ws.js";
+import { connectSocket, disconnectSocket, onSocketMessage, sendSocketMessage } from "./ws.js";
 
-let currentUser = null;
-let allCategories = [];
-let activeFilterCategories = [];
+let me;
+let categories = [];
 let users = [];
-let socketHandlersRegistered = false;
-let globalListenersBound = false;
+let filters = [];
+let activeChat = null;
+let hasMoreMessages = false;
+let loadingMessages = false;
+let socketHandlersBound = false;
 
-function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
+const icons = {
+    like: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v11H3V10h4Zm4.2 11H9V10l3.6-7c.4-.8 1.4-1.2 2.2-.8.7.3 1.1 1 1 1.8l-.7 4H20c1.1 0 2 .9 2 2l-1 8c-.2 1.7-1.7 3-3.5 3h-6.3Z"/></svg>`,
+    dislike: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14V3H3v11h4Zm4.2-11H9v11l3.6 7c.4.8 1.4 1.2 2.2.8.7-.3 1.1-1 1-1.8l-.7-4H20c1.1 0 2-.9 2-2l-1-8c-.2-1.7-1.7-3-3.5-3h-6.3Z"/></svg>`,
+};
+
+function escapeHTML(value = "") {
+    const element = document.createElement("div");
+    element.textContent = value;
+    return element.innerHTML;
 }
 
-function formatDate(dateStr) {
-    if (!dateStr) return "";
-    const d = new Date(dateStr.replace(" ", "T"));
-    return d.toLocaleString(undefined, {
-        year: "numeric", month: "short", day: "numeric",
-        hour: "2-digit", minute: "2-digit"
-    });
+function initials(name = "") {
+    return name.slice(0, 2).toUpperCase();
 }
 
-function formatRelativeDate(dateStr) {
-    if (!dateStr) return "";
-    const d = new Date(dateStr.replace(" ", "T"));
-    const now = new Date();
-    const diff = now - d;
-    const days = Math.floor(diff / 86400000);
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
-    if (days < 7) return days + "d ago";
-    return formatDate(dateStr);
+function date(value, compact = false) {
+    if (!value) return "";
+    const parsed = new Date(value.replace(" ", "T"));
+    return new Intl.DateTimeFormat(undefined, compact
+        ? { hour: "numeric", minute: "2-digit" }
+        : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+    ).format(parsed);
 }
 
-function createPostHTML(post) {
-    const cats = post.categories.map(c =>
-        `<span class="category-tag">${escapeHtml(c.name)}</span>`
-    ).join("");
-
-    const preview = post.content.length > 200
-        ? escapeHtml(post.content.substring(0, 200)) + "&hellip;"
-        : escapeHtml(post.content);
-
-    const likeActive = post.userReaction === "like" ? " reaction-active" : "";
-    const dislikeActive = post.userReaction === "dislike" ? " reaction-active" : "";
-
-    return `
-        <article class="post-card" data-post-id="${post.id}">
-            <div class="post-clickable">
-                <div class="post-header">
-                    <span class="post-author">${escapeHtml(post.author)}</span>
-                    <span class="post-date">${formatDate(post.createdAt)}</span>
-                </div>
-                <div class="post-content">${preview}</div>
-                <div class="post-meta">
-                    <div class="post-categories">${cats}</div>
-                    <span class="post-comments-count">${post.commentCount} comments</span>
-                </div>
-                <div class="post-reactions">
-                    <button class="reaction-btn${likeActive}" data-reaction="like" data-post-id="${post.id}">+${post.likeCount}</button>
-                    <button class="reaction-btn${dislikeActive}" data-reaction="dislike" data-post-id="${post.id}">-${post.dislikeCount}</button>
-                </div>
-            </div>
-            <div class="post-comments" id="comments-${post.id}" style="display:none;">
-                <div class="comments-list" id="comments-list-${post.id}"></div>
-                <div class="comment-form">
-                    <textarea id="comment-input-${post.id}" placeholder="Write a comment..." rows="2"></textarea>
-                    <button class="btn-comment" data-post-id="${post.id}">REPLY</button>
-                </div>
-                <p class="error-msg" id="comment-error-${post.id}"></p>
-            </div>
-        </article>
-    `;
+function reactionButtons(item, type) {
+    const idName = type === "post" ? "post-id" : "comment-id";
+    return `<div class="${type}-reactions reactions">
+        <button class="reaction-btn ${item.userReaction === "like" ? "active" : ""}" data-reaction="like" data-${idName}="${item.id}" aria-label="Like">${icons.like}<span>${item.likeCount}</span></button>
+        <button class="reaction-btn ${item.userReaction === "dislike" ? "active dislike" : ""}" data-reaction="dislike" data-${idName}="${item.id}" aria-label="Dislike">${icons.dislike}<span>${item.dislikeCount}</span></button>
+    </div>`;
 }
 
-function createCommentHTML(comment) {
-    const likeActive = comment.userReaction === "like" ? " reaction-active" : "";
-    const dislikeActive = comment.userReaction === "dislike" ? " reaction-active" : "";
-
-    return `
-        <div class="comment" data-comment-id="${comment.id}">
-            <div class="comment-header">
-                <span class="comment-author">${escapeHtml(comment.author)}</span>
-                <span class="comment-date">${formatDate(comment.createdAt)}</span>
-            </div>
-            <div class="comment-content">${escapeHtml(comment.content)}</div>
-            <div class="comment-reactions">
-                <button class="reaction-btn reaction-btn-sm${likeActive}" data-reaction="like" data-comment-id="${comment.id}">+${comment.likeCount}</button>
-                <button class="reaction-btn reaction-btn-sm${dislikeActive}" data-reaction="dislike" data-comment-id="${comment.id}">-${comment.dislikeCount}</button>
-            </div>
+function postHTML(post) {
+    return `<article class="post-card" data-post-id="${post.id}">
+        <div class="post-clickable">
+            <header class="post-header">
+                <span class="avatar">${initials(post.author)}</span>
+                <div><strong>${escapeHTML(post.author)}</strong><time>${date(post.createdAt)}</time></div>
+            </header>
+            <p class="post-content">${escapeHTML(post.content)}</p>
+            <div class="post-tags">${(post.categories || []).map(cat => `<span>${escapeHTML(cat.name)}</span>`).join("")}</div>
+            <footer class="post-footer">
+                ${reactionButtons(post, "post")}
+                <button class="comments-link" data-open-comments="${post.id}"><span aria-hidden="true">◯</span> ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}</button>
+            </footer>
         </div>
-    `;
+        <section class="post-comments" id="comments-${post.id}" hidden>
+            <div class="comments-list" id="comments-list-${post.id}"></div>
+            <form class="comment-form" data-post-id="${post.id}">
+                <textarea id="comment-input-${post.id}" maxlength="1000" placeholder="Join the conversation…" rows="2"></textarea>
+                <button class="primary-btn compact" type="submit">Reply</button>
+            </form>
+            <p class="form-error" id="comment-error-${post.id}"></p>
+        </section>
+    </article>`;
 }
 
-function renderUserList() {
-    const container = document.getElementById("users-list");
-    if (!container) return;
-
-    const onlineUsers = users.filter(u => u.online);
-    const offlineUsers = users.filter(u => !u.online);
-
-    container.innerHTML = "";
-
-    if (onlineUsers.length > 0) {
-        const section = document.createElement("div");
-        section.className = "users-section";
-        section.innerHTML = '<div class="users-section-title">ONLINE</div>';
-        onlineUsers.forEach(u => {
-            section.appendChild(createUserItem(u));
-        });
-        container.appendChild(section);
-    }
-
-    if (offlineUsers.length > 0) {
-        const section = document.createElement("div");
-        section.className = "users-section";
-        section.innerHTML = '<div class="users-section-title">OFFLINE</div>';
-        offlineUsers.forEach(u => {
-            section.appendChild(createUserItem(u));
-        });
-        container.appendChild(section);
-    }
-}
-
-function createUserItem(user) {
-    const div = document.createElement("div");
-    div.className = "user-item" + (user.online ? " user-online" : "");
-    div.dataset.userId = user.id;
-
-    const lastMsg = user.lastMessage
-        ? `<span class="user-last-msg">${formatRelativeDate(user.lastMessage)}</span>`
-        : "";
-
-    div.innerHTML = `
-        <span class="user-status-dot"></span>
-        <span class="user-name">${escapeHtml(user.nickname)}</span>
-        ${lastMsg}
-    `;
-
-    div.addEventListener("click", () => {
-        document.querySelectorAll(".user-item").forEach(el => el.classList.remove("user-selected"));
-        div.classList.add("user-selected");
-    });
-
-    return div;
-}
-
-async function loadUsers() {
-    try {
-        users = await api.getUsers();
-        if (currentUser) {
-            const selfIdx = users.findIndex(u => u.id === currentUser.id);
-            if (selfIdx > -1) users[selfIdx].online = true;
-        }
-        renderUserList();
-    } catch {
-        console.error("Failed to load users");
-    }
-}
-
-function renderCategoryFilter() {
-    const container = document.getElementById("category-filter");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    const allBtn = document.createElement("button");
-    allBtn.className = "filter-btn" + (activeFilterCategories.length === 0 ? " filter-active" : "");
-    allBtn.textContent = "ALL";
-    allBtn.addEventListener("click", () => {
-        activeFilterCategories = [];
-        loadPosts();
-        renderCategoryFilter();
-    });
-    container.appendChild(allBtn);
-
-    allCategories.forEach(cat => {
-        const btn = document.createElement("button");
-        const isActive = activeFilterCategories.includes(cat.id);
-        btn.className = "filter-btn" + (isActive ? " filter-active" : "");
-        btn.textContent = cat.name.toUpperCase();
-        btn.addEventListener("click", () => {
-            const idx = activeFilterCategories.indexOf(cat.id);
-            if (idx > -1) {
-                activeFilterCategories.splice(idx, 1);
-            } else {
-                activeFilterCategories.push(cat.id);
-            }
-            loadPosts();
-            renderCategoryFilter();
-        });
-        container.appendChild(btn);
-    });
-}
-
-async function submitPost() {
-    const content = document.getElementById("post-content").value.trim();
-    const checkedBoxes = document.querySelectorAll("#create-category-checkboxes input:checked");
-    const categoryIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-    const errorEl = document.getElementById("create-post-error");
-    errorEl.textContent = "";
-
-    if (!content) { errorEl.textContent = "Content is required"; return; }
-    if (categoryIds.length === 0) { errorEl.textContent = "Select at least one category"; return; }
-
-    try {
-        await api.createPost({ content, categoryIds });
-        document.getElementById("post-content").value = "";
-        checkedBoxes.forEach(cb => cb.checked = false);
-        const section = document.getElementById("create-post-section");
-        if (section) section.classList.remove("create-post-open");
-        loadPosts();
-    } catch (err) {
-        errorEl.textContent = err.message;
-    }
+function commentHTML(comment) {
+    return `<div class="comment" data-comment-id="${comment.id}">
+        <div class="comment-line"><strong>${escapeHTML(comment.author)}</strong><time>${date(comment.createdAt)}</time></div>
+        <p>${escapeHTML(comment.content)}</p>
+        ${reactionButtons(comment, "comment")}
+    </div>`;
 }
 
 async function loadPosts() {
     const container = document.getElementById("posts-container");
+    if (!container) return;
+    container.innerHTML = `<div class="loading-state">Loading conversations…</div>`;
     try {
-        const posts = await api.getPosts(activeFilterCategories);
-        if (posts.length === 0) {
-            container.innerHTML = '<p class="empty-feed">No transmissions match your filter. Be the first!</p>';
-            return;
-        }
-        container.innerHTML = posts.map(createPostHTML).join("");
-    } catch {
-        container.innerHTML = '<p class="error-msg">Failed to load posts</p>';
+        const posts = await api.getPosts(filters);
+        container.innerHTML = posts.length ? posts.map(postHTML).join("") :
+            `<div class="empty-state"><strong>No posts here yet</strong><span>Start a conversation with the community.</span></div>`;
+    } catch (error) {
+        container.innerHTML = `<div class="empty-state error">Could not load posts.</div>`;
     }
 }
 
-async function togglePost(postId) {
-    const commentsDiv = document.getElementById("comments-" + postId);
-    if (!commentsDiv) return;
-
-    if (commentsDiv.style.display === "block") {
-        commentsDiv.style.display = "none";
-        return;
-    }
-
-    commentsDiv.style.display = "block";
-
-    if (!commentsDiv.dataset.loaded) {
-        try {
-            const post = await api.getPost(postId);
-            const list = document.getElementById("comments-list-" + postId);
-            if (post.comments && post.comments.length > 0) {
-                list.innerHTML = post.comments.map(createCommentHTML).join("");
-            } else {
-                list.innerHTML = '<p class="empty-comments">No comments yet.</p>';
-            }
-            commentsDiv.dataset.loaded = "true";
-        } catch {
-            const errEl = document.getElementById("comment-error-" + postId);
-            if (errEl) errEl.textContent = "Failed to load comments";
-        }
-    }
+function renderFilters() {
+    const host = document.getElementById("category-filter");
+    if (!host) return;
+    host.innerHTML = `<button class="filter-chip ${filters.length ? "" : "active"}" data-filter="all">All posts</button>` +
+        categories.map(cat => `<button class="filter-chip ${filters.includes(cat.id) ? "active" : ""}" data-filter="${cat.id}">${escapeHTML(cat.name)}</button>`).join("");
 }
 
-async function submitComment(postId) {
-    const input = document.getElementById("comment-input-" + postId);
-    const content = input.value.trim();
-    const errEl = document.getElementById("comment-error-" + postId);
-    if (errEl) errEl.textContent = "";
-
-    if (!content) {
-        if (errEl) errEl.textContent = "Comment cannot be empty";
-        return;
-    }
-
+async function toggleComments(postId) {
+    const section = document.getElementById(`comments-${postId}`);
+    section.hidden = !section.hidden;
+    if (section.hidden || section.dataset.loaded) return;
     try {
-        await api.createComment({ postId, content });
-        input.value = "";
         const post = await api.getPost(postId);
-        const list = document.getElementById("comments-list-" + postId);
-        if (post.comments && post.comments.length > 0) {
-            list.innerHTML = post.comments.map(createCommentHTML).join("");
-        }
-    } catch (err) {
-        if (errEl) errEl.textContent = err.message;
+        document.getElementById(`comments-list-${postId}`).innerHTML = post.comments?.length
+            ? post.comments.map(commentHTML).join("")
+            : `<p class="empty-comments">No comments yet. Be the first to reply.</p>`;
+        section.dataset.loaded = "true";
+    } catch {
+        document.getElementById(`comment-error-${postId}`).textContent = "Comments could not be loaded.";
     }
 }
 
-async function handleReaction(e) {
-    const btn = e.target.closest(".reaction-btn");
-    if (!btn) return;
+async function sendComment(form) {
+    const postId = Number(form.dataset.postId);
+    const input = document.getElementById(`comment-input-${postId}`);
+    const error = document.getElementById(`comment-error-${postId}`);
+    error.textContent = "";
+    if (!input.value.trim()) return;
+    try {
+        await api.createComment({ postId, content: input.value.trim() });
+        input.value = "";
+    } catch (err) {
+        error.textContent = err.message;
+    }
+}
 
-    const reactionType = btn.dataset.reaction;
-    const postId = btn.dataset.postId;
-    const commentId = btn.dataset.commentId;
+async function react(button) {
+    const targetType = button.dataset.postId ? "post" : "comment";
+    const targetId = Number(button.dataset.postId || button.dataset.commentId);
+    try {
+        await api.toggleReaction({ targetType, targetId, reactionType: button.dataset.reaction });
+        const item = targetType === "post" ? await api.getPost(targetId) : null;
+        if (item) {
+            const old = button.closest(".post-reactions");
+            const holder = document.createElement("div");
+            holder.innerHTML = reactionButtons(item, "post");
+            old.replaceWith(holder.firstElementChild);
+        } else {
+            const card = button.closest(".post-card");
+            if (card) {
+                const post = await api.getPost(Number(card.dataset.postId));
+                card.querySelector(".comments-list").innerHTML = post.comments.map(commentHTML).join("");
+            }
+        }
+    } catch {}
+}
 
-    let targetType, targetId;
-    if (postId) {
-        targetType = "post";
-        targetId = parseInt(postId);
-    } else if (commentId) {
-        targetType = "comment";
-        targetId = parseInt(commentId);
-    } else {
+function userItem(user) {
+    const unread = user.unread || 0;
+    return `<button class="user-item ${user.online ? "online" : ""} ${activeChat?.id === user.id ? "selected" : ""}" data-user-id="${user.id}">
+        <span class="avatar">${initials(user.nickname)}<i></i></span>
+        <span class="user-copy"><strong>${escapeHTML(user.nickname)}</strong><small>${user.online ? "Online" : "Offline"}</small></span>
+        ${unread ? `<b class="unread">${unread}</b>` : ""}
+    </button>`;
+}
+
+function renderUsers() {
+    const list = document.getElementById("users-list");
+    if (!list) return;
+    list.innerHTML = users.length ? users.map(userItem).join("") : `<p class="empty-users">No other members yet.</p>`;
+}
+
+async function loadUsers() {
+    try {
+        const fresh = await api.getUsers();
+        users = fresh.map(user => ({ ...user, unread: users.find(old => old.id === user.id)?.unread || 0 }));
+        renderUsers();
+    } catch {}
+}
+
+function chatMessageHTML(message) {
+    const own = message.senderId === me.id;
+    return `<div class="chat-message ${own ? "own" : ""}" data-message-id="${message.id}">
+        <div><strong>${own ? "You" : escapeHTML(message.sender)}</strong><p>${escapeHTML(message.content)}</p><time>${date(message.createdAt, true)}</time></div>
+    </div>`;
+}
+
+async function openChat(userId) {
+    activeChat = users.find(user => user.id === userId);
+    if (!activeChat) return;
+    activeChat.unread = 0;
+    renderUsers();
+    document.getElementById("chat-empty").hidden = true;
+    document.getElementById("chat-view").hidden = false;
+    document.getElementById("chat-name").textContent = activeChat.nickname;
+    document.getElementById("chat-status").textContent = activeChat.online ? "Online now" : "Offline";
+    updateChatComposer();
+    const list = document.getElementById("chat-messages");
+    list.innerHTML = `<div class="loading-state">Loading messages…</div>`;
+    loadingMessages = true;
+    try {
+        const page = await api.getMessages(userId);
+        hasMoreMessages = page.hasMore;
+        list.innerHTML = page.messages.length
+            ? page.messages.map(chatMessageHTML).join("")
+            : `<div class="chat-start"><strong>Start a conversation</strong><span>Say hello to ${escapeHTML(activeChat.nickname)}.</span></div>`;
+        list.scrollTop = list.scrollHeight;
+    } catch (error) {
+        hasMoreMessages = false;
+        list.innerHTML = `<div class="chat-start"><strong>Messages could not load</strong><span>Please close this chat and try again.</span></div>`;
+    } finally {
+        loadingMessages = false;
+    }
+}
+
+function updateChatComposer() {
+    if (!activeChat) return;
+    const input = document.getElementById("chat-input");
+    const button = document.getElementById("chat-send");
+    input.disabled = !activeChat.online;
+    button.disabled = !activeChat.online;
+    input.placeholder = activeChat.online ? `Message ${activeChat.nickname}…` : `${activeChat.nickname} is offline`;
+}
+
+async function loadOlderMessages() {
+    const list = document.getElementById("chat-messages");
+    const first = list.querySelector("[data-message-id]");
+    if (!activeChat || !hasMoreMessages || loadingMessages || !first || list.scrollTop > 80) return;
+    loadingMessages = true;
+    const oldHeight = list.scrollHeight;
+    try {
+        const page = await api.getMessages(activeChat.id, Number(first.dataset.messageId));
+        hasMoreMessages = page.hasMore;
+        if (page.messages.length) {
+            list.insertAdjacentHTML("afterbegin", page.messages.map(chatMessageHTML).join(""));
+            list.scrollTop = list.scrollHeight - oldHeight;
+        }
+    } finally {
+        loadingMessages = false;
+    }
+}
+
+function sendChat() {
+    const input = document.getElementById("chat-input");
+    const error = document.getElementById("chat-error");
+    error.textContent = "";
+    if (!activeChat || !activeChat.online || !input.value.trim()) return;
+    if (!sendSocketMessage("chat_message", { receiverId: activeChat.id, content: input.value.trim() })) {
+        error.textContent = "Connecting… please try again.";
         return;
     }
+    input.value = "";
+}
 
-    try {
-        await api.toggleReaction({ targetType, targetId, reactionType });
+function receiveChatMessage(message) {
+    const otherId = message.senderId === me.id ? message.receiverId : message.senderId;
+    const user = users.find(item => item.id === otherId);
+    if (user) {
+        user.lastMessage = message.createdAt;
+        if (activeChat?.id !== otherId && message.senderId !== me.id) user.unread = (user.unread || 0) + 1;
+        users.sort((a, b) => (b.lastMessage || "").localeCompare(a.lastMessage || "") || a.nickname.localeCompare(b.nickname));
+        renderUsers();
+    }
+    if (activeChat?.id !== otherId) return;
+    const list = document.getElementById("chat-messages");
+    list.querySelector(".chat-start")?.remove();
+    if (!list.querySelector(`[data-message-id="${message.id}"]`)) list.insertAdjacentHTML("beforeend", chatMessageHTML(message));
+    list.scrollTop = list.scrollHeight;
+}
 
-        if (targetType === "post") {
-            const postCard = btn.closest(".post-card");
-            if (postCard) {
-                const postIdVal = postCard.dataset.postId;
-                const post = await api.getPost(postIdVal);
-                const clickable = postCard.querySelector(".post-clickable");
-                const reactionsDiv = clickable.querySelector(".post-reactions");
-                if (reactionsDiv) {
-                    const likeActive = post.userReaction === "like" ? " reaction-active" : "";
-                    const dislikeActive = post.userReaction === "dislike" ? " reaction-active" : "";
-                    reactionsDiv.innerHTML = `
-                        <button class="reaction-btn${likeActive}" data-reaction="like" data-post-id="${post.id}">+${post.likeCount}</button>
-                        <button class="reaction-btn${dislikeActive}" data-reaction="dislike" data-post-id="${post.id}">-${post.dislikeCount}</button>
-                    `;
-                }
-            }
-        } else {
-            const commentsDiv = btn.closest(".post-comments");
-            if (commentsDiv) {
-                const postCard = commentsDiv.closest(".post-card");
-                if (postCard) {
-                    const post = await api.getPost(parseInt(postCard.dataset.postId));
-                    const list = commentsDiv.querySelector(".comments-list");
-                    if (post.comments && post.comments.length > 0) {
-                        list.innerHTML = post.comments.map(createCommentHTML).join("");
-                    }
-                }
-            }
+function bindSocketHandlers() {
+    if (socketHandlersBound) return;
+    socketHandlersBound = true;
+    onSocketMessage("user_online", data => updatePresence(data.userId, true));
+    onSocketMessage("user_offline", data => updatePresence(data.userId, false));
+    onSocketMessage("chat_message", receiveChatMessage);
+    onSocketMessage("chat_error", data => {
+        const error = document.getElementById("chat-error");
+        if (error) error.textContent = data.message;
+    });
+    onSocketMessage("new_post", loadPosts);
+    onSocketMessage("new_comment", data => {
+        const section = document.getElementById(`comments-${data.postId}`);
+        if (section?.dataset.loaded) {
+            section.querySelector(".empty-comments")?.remove();
+            if (!section.querySelector(`[data-comment-id="${data.id}"]`)) section.querySelector(".comments-list").insertAdjacentHTML("beforeend", commentHTML(data));
         }
-    } catch {
-        console.error("Reaction failed");
-    }
-}
-
-
-function addNewPostFromSocket(post) {
-    const container = document.getElementById("posts-container");
-    if (!container) return;
-
-    if (document.querySelector(`.post-card[data-post-id="${post.id}"]`)) return;
-
-    if (activeFilterCategories.length > 0) {
-        const matches = (post.categoryIds || []).some(id => activeFilterCategories.includes(id));
-        if (!matches) return;
-    }
-
-    const categories = allCategories.filter(c => (post.categoryIds || []).includes(c.id));
-    const fullPost = { ...post, categories };
-
-    const emptyMsg = container.querySelector(".empty-feed");
-    if (emptyMsg) container.innerHTML = "";
-
-    container.insertAdjacentHTML("afterbegin", createPostHTML(fullPost));
-}
-
-function addNewCommentFromSocket(comment) {
-    const postCard = document.querySelector(`.post-card[data-post-id="${comment.postId}"]`);
-    if (postCard) {
-        const countEl = postCard.querySelector(".post-comments-count");
-        if (countEl) {
-            const current = parseInt(countEl.textContent) || 0;
-            countEl.textContent = (current + 1) + " comments";
+        const link = document.querySelector(`[data-post-id="${data.postId}"] .comments-link`);
+        if (link) {
+            const count = (Number(link.textContent.match(/\d+/)?.[0]) || 0) + 1;
+            link.innerHTML = `<span aria-hidden="true">◯</span> ${count} ${count === 1 ? "comment" : "comments"}`;
         }
-    }
-
-    const commentsDiv = document.getElementById("comments-" + comment.postId);
-    if (!commentsDiv || !commentsDiv.dataset.loaded) return;
-
-    if (document.querySelector(`.comment[data-comment-id="${comment.id}"]`)) return;
-
-    const list = document.getElementById("comments-list-" + comment.postId);
-    if (!list) return;
-
-    const emptyMsg = list.querySelector(".empty-comments");
-    if (emptyMsg) list.innerHTML = "";
-
-    list.insertAdjacentHTML("beforeend", createCommentHTML(comment));
+    });
+    onSocketMessage("reaction_update", data => {
+        const container = document.querySelector(data.targetType === "post"
+            ? `[data-post-id="${data.targetId}"] .post-reactions`
+            : `[data-comment-id="${data.targetId}"] .comment-reactions`);
+        if (!container) return;
+        container.querySelector('[data-reaction="like"] span').textContent = data.likeCount;
+        container.querySelector('[data-reaction="dislike"] span').textContent = data.dislikeCount;
+    });
 }
 
-function updateReactionCountsFromSocket(data) {
-    const { targetType, targetId, likeCount, dislikeCount } = data;
-
-    const selector = targetType === "post"
-        ? `.post-card[data-post-id="${targetId}"] .post-reactions`
-        : `.comment[data-comment-id="${targetId}"] .comment-reactions`;
-
-    const container = document.querySelector(selector);
-    if (!container) return;
-
-    const likeBtn = container.querySelector('[data-reaction="like"]');
-    const dislikeBtn = container.querySelector('[data-reaction="dislike"]');
-    if (likeBtn) likeBtn.textContent = "+" + likeCount;
-    if (dislikeBtn) dislikeBtn.textContent = "-" + dislikeCount;
+function updatePresence(id, online) {
+    const user = users.find(item => item.id === id);
+    if (!user) return loadUsers();
+    user.online = online;
+    if (activeChat?.id === id) {
+        activeChat.online = online;
+        document.getElementById("chat-status").textContent = online ? "Online now" : "Offline";
+        updateChatComposer();
+    }
+    renderUsers();
 }
 
-function updateUserOnlineStatus(userId, online) {
-    const idx = users.findIndex(u => u.id === userId);
-    if (idx > -1) {
-        users[idx].online = online;
-        renderUserList();
-    } else {
-        loadUsers();
-    }
+function bindEvents(navigateTo) {
+    document.getElementById("logout-btn").addEventListener("click", async () => {
+        disconnectSocket();
+        try { await api.logout(); } finally { navigateTo("login"); }
+    });
+    document.getElementById("new-post-btn").addEventListener("click", () => document.getElementById("composer").classList.toggle("open"));
+    document.getElementById("cancel-post").addEventListener("click", () => document.getElementById("composer").classList.remove("open"));
+    document.getElementById("submit-post").addEventListener("click", async () => {
+        const content = document.getElementById("post-content");
+        const selected = [...document.querySelectorAll("#create-category-checkboxes input:checked")].map(input => Number(input.value));
+        const error = document.getElementById("create-post-error");
+        error.textContent = "";
+        if (!content.value.trim() || !selected.length) return error.textContent = "Write something and choose at least one topic.";
+        try {
+            await api.createPost({ content: content.value.trim(), categoryIds: selected });
+            content.value = "";
+            document.querySelectorAll("#create-category-checkboxes input").forEach(input => input.checked = false);
+            document.getElementById("composer").classList.remove("open");
+        } catch (err) { error.textContent = err.message; }
+    });
+    document.getElementById("category-filter").addEventListener("click", event => {
+        const button = event.target.closest("[data-filter]");
+        if (!button) return;
+        if (button.dataset.filter === "all") filters = [];
+        else {
+            const id = Number(button.dataset.filter);
+            filters = filters.includes(id) ? filters.filter(value => value !== id) : [...filters, id];
+        }
+        renderFilters();
+        loadPosts();
+    });
+    document.getElementById("posts-container").addEventListener("click", event => {
+        const reaction = event.target.closest(".reaction-btn");
+        if (reaction) return react(reaction);
+        const comments = event.target.closest("[data-open-comments]");
+        if (comments) toggleComments(Number(comments.dataset.openComments));
+    });
+    document.getElementById("posts-container").addEventListener("submit", event => {
+        const form = event.target.closest(".comment-form");
+        if (form) { event.preventDefault(); sendComment(form); }
+    });
+    document.getElementById("users-list").addEventListener("click", event => {
+        const item = event.target.closest("[data-user-id]");
+        if (item) openChat(Number(item.dataset.userId));
+    });
+    document.getElementById("chat-close").addEventListener("click", () => {
+        activeChat = null;
+        document.getElementById("chat-view").hidden = true;
+        document.getElementById("chat-empty").hidden = false;
+        renderUsers();
+    });
+    document.getElementById("chat-send").addEventListener("click", sendChat);
+    document.getElementById("chat-input").addEventListener("keydown", event => {
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }
+    });
+    let scrollFrame;
+    document.getElementById("chat-messages").addEventListener("scroll", () => {
+        if (scrollFrame) return;
+        scrollFrame = requestAnimationFrame(() => { scrollFrame = null; loadOlderMessages(); });
+    });
 }
 
 export async function renderFeed(app, navigateTo) {
     try {
-        currentUser = await api.getMe();
+        [me, categories] = await Promise.all([api.getMe(), api.getCategories()]);
     } catch {
         navigateTo("login");
         return;
     }
-
-    try {
-        allCategories = await api.getCategories();
-    } catch {
-        allCategories = [];
-    }
-
-    app.innerHTML = `
-        <div class="app-layout">
-            <header class="app-header">
-                <h1 class="app-title">SULU-TIME-FORUM</h1>
-                <div class="user-info">
-                    <span class="user-nickname">${escapeHtml(currentUser.nickname)}</span>
-                    <button id="logout-btn" class="btn-logout">LOGOUT</button>
-                </div>
-            </header>
-            <div class="app-body">
-                <aside class="users-panel" id="users-panel">
-                    <div class="users-panel-header">
-                        <h3 class="users-panel-title">USERS</h3>
-                    </div>
-                    <div class="users-list" id="users-list"></div>
-                </aside>
-                <div class="main-content">
-                    <div class="create-post-section" id="create-post-section">
-                        <div class="create-post-toggle" id="create-post-toggle">
-                            <span class="create-post-icon">+</span>
-                            <span>NEW TRANSMISSION</span>
-                        </div>
-                        <div class="create-post-body">
-                            <textarea id="post-content" placeholder="Type your message..." rows="4"></textarea>
-                            <div class="category-checkboxes" id="create-category-checkboxes"></div>
-                            <button id="submit-post">SEND</button>
-                            <p class="error-msg" id="create-post-error"></p>
-                        </div>
-                    </div>
-                    <div class="category-filter-bar">
-                        <div class="category-filter" id="category-filter"></div>
-                    </div>
-                    <section class="feed">
-                        <h2 class="feed-title">LIVE FEED</h2>
-                        <div id="posts-container"></div>
-                    </section>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.getElementById("logout-btn").addEventListener("click", async () => {
-        try { await api.logout(); } catch {}
-        window.location.reload();
-    });
-
-    document.getElementById("create-post-toggle").addEventListener("click", () => {
-        document.getElementById("create-post-section").classList.toggle("create-post-open");
-    });
-
-    const catContainer = document.getElementById("create-category-checkboxes");
-    allCategories.forEach(cat => {
-        const label = document.createElement("label");
-        label.className = "category-label";
-        label.innerHTML = '<input type="checkbox" value="' + cat.id + '"> ' + escapeHtml(cat.name);
-        catContainer.appendChild(label);
-    });
-
-    document.getElementById("submit-post").addEventListener("click", submitPost);
-    document.getElementById("post-content").addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && e.ctrlKey) submitPost();
-    });
-
+    app.innerHTML = `<div class="app-shell">
+        <header class="topbar">
+            <div class="brand"><span class="brand-mark">F</span><span><strong>Forum</strong><small>Community space</small></span></div>
+            <div class="top-actions"><button id="new-post-btn" class="primary-btn">＋ Create post</button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out">↗</button></div>
+        </header>
+        <main class="workspace">
+            <aside class="people-panel">
+                <div class="panel-heading"><div><strong>Messages</strong><small>Your conversations</small></div><span class="live-dot"></span></div>
+                <div id="users-list" class="users-list"></div>
+            </aside>
+            <section class="feed-panel">
+                <div class="feed-heading"><div><p class="eyebrow">Community</p><h1>Latest discussions</h1><p>Share an idea, ask a question, or join the conversation.</p></div></div>
+                <section id="composer" class="composer">
+                    <textarea id="post-content" maxlength="5000" rows="4" placeholder="What would you like to discuss?"></textarea>
+                    <div id="create-category-checkboxes" class="category-options">${categories.map(cat => `<label><input type="checkbox" value="${cat.id}"><span>${escapeHTML(cat.name)}</span></label>`).join("")}</div>
+                    <p id="create-post-error" class="form-error"></p>
+                    <div class="composer-actions"><button id="cancel-post" class="secondary-btn">Cancel</button><button id="submit-post" class="primary-btn">Publish post</button></div>
+                </section>
+                <nav id="category-filter" class="filter-row" aria-label="Filter posts"></nav>
+                <div id="posts-container" class="posts"></div>
+            </section>
+            <aside class="chat-panel">
+                <div id="chat-empty" class="chat-empty"><span class="chat-illustration">✦</span><strong>Your messages</strong><p>Choose a member to open a private conversation.</p></div>
+                <section id="chat-view" class="chat-view" hidden>
+                    <header class="chat-header"><div><strong id="chat-name"></strong><small id="chat-status"></small></div><button id="chat-close" class="icon-btn" aria-label="Close chat">×</button></header>
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="1"></textarea><button id="chat-send" class="send-btn" aria-label="Send message">➤</button></div>
+                    <p id="chat-error" class="form-error chat-error"></p>
+                </section>
+            </aside>
+        </main>
+    </div>`;
+    renderFilters();
+    bindEvents(navigateTo);
+    // A login can replace the session cookie while an earlier tab's socket is still open.
+    // Reconnect here so the WebSocket always belongs to the user currently shown in the UI.
+    disconnectSocket();
     connectSocket();
-
-    renderCategoryFilter();
-    loadPosts();
-    loadUsers();
-
-    document.getElementById("posts-container").addEventListener("click", (e) => {
-        if (e.target.closest(".reaction-btn")) return;
-        const postCard = e.target.closest(".post-card");
-        if (!postCard) return;
-        if (e.target.closest(".post-comments") || e.target.closest(".btn-comment")) return;
-        const postId = parseInt(postCard.dataset.postId);
-        togglePost(postId);
-    });
-
-    if (!globalListenersBound) {
-        document.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-comment");
-            if (!btn) return;
-            const postId = parseInt(btn.dataset.postId);
-            submitComment(postId);
-        });
-
-        document.addEventListener("click", handleReaction);
-        globalListenersBound = true;
-    }
-
-    if (!socketHandlersRegistered) {
-        onSocketMessage("new_post", addNewPostFromSocket);
-        onSocketMessage("new_comment", addNewCommentFromSocket);
-        onSocketMessage("reaction_update", updateReactionCountsFromSocket);
-        onSocketMessage("user_online", (data) => updateUserOnlineStatus(data.userId, true));
-        onSocketMessage("user_offline", (data) => updateUserOnlineStatus(data.userId, false));
-        socketHandlersRegistered = true;
-    }
+    bindSocketHandlers();
+    await Promise.all([loadPosts(), loadUsers()]);
 }

@@ -1,11 +1,14 @@
 let socket = null;
 const listeners = {};
+let reconnectTimer = null;
+let shouldReconnect = false;
 
 export function connectSocket() {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
         return socket;
     }
 
+    shouldReconnect = true;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
@@ -21,7 +24,10 @@ export function connectSocket() {
     });
 
     socket.addEventListener("close", () => {
-        setTimeout(connectSocket, 2000);
+        if (shouldReconnect) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connectSocket, 2000);
+        }
     });
 
     return socket;
@@ -30,6 +36,19 @@ export function connectSocket() {
 export function onSocketMessage(type, callback) {
     if (!listeners[type]) listeners[type] = [];
     listeners[type].push(callback);
+    return () => {
+        listeners[type] = (listeners[type] || []).filter(cb => cb !== callback);
+    };
+}
+
+export function disconnectSocket() {
+    shouldReconnect = false;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    if (socket) {
+        socket.close();
+        socket = null;
+    }
 }
 
 export function sendSocketMessage(type, data) {
