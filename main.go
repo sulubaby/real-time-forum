@@ -21,6 +21,10 @@ func main() {
 
 	fileServer := http.FileServer(http.Dir("./frontend"))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" || path.Ext(r.URL.Path) != "" {
 			fileServer.ServeHTTP(w, r)
 			return
@@ -44,8 +48,8 @@ func main() {
 	http.HandleFunc("/api/reactions", handlers.APIHandler(handlers.AuthMiddleware(handlers.ToggleReactionHandler)))
 	http.HandleFunc("/ws", handlers.WebSocketHandler)
 
-	fmt.Println("Server is running smoothly on http://localhost:8000")
-	err = http.ListenAndServe(":8000", nil)
+	fmt.Println("Server is running smoothly on http://localhost:8080")
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
