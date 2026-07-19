@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { connectSocket, disconnectSocket, onSocketMessage, sendSocketMessage } from "./ws.js";
+import { icon, notify, setButtonLoading } from "./ui.js";
 
 let me;
 let categories = [];
@@ -9,6 +10,8 @@ let activeChat = null;
 let hasMoreMessages = false;
 let loadingMessages = false;
 let socketHandlersBound = false;
+let navigate;
+let lastRefreshedAt = null;
 
 const icons = {
     like: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v11H3V10h4Zm4.2 11H9V10l3.6-7c.4-.8 1.4-1.2 2.2-.8.7.3 1.1 1 1 1.8l-.7 4H20c1.1 0 2 .9 2 2l-1 8c-.2 1.7-1.7 3-3.5 3h-6.3Z"/></svg>`,
@@ -34,6 +37,24 @@ function date(value, compact = false) {
     ).format(parsed);
 }
 
+function handleRequestError(error, title = "Request failed") {
+    if (error?.status === 401) {
+        disconnectSocket();
+        navigate("login");
+        return;
+    }
+    if (error?.status === 404 || error?.status >= 500 || error?.status === 0) {
+        disconnectSocket();
+        navigate("error", {
+            status: error.status || 503,
+            message: error.message,
+            authenticated: true,
+        });
+        return;
+    }
+    notify(error?.message || "Please try again.", "error", title);
+}
+
 function reactionButtons(item, type) {
     const idName = type === "post" ? "post-id" : "comment-id";
     return `<div class="${type}-reactions reactions">
@@ -53,7 +74,7 @@ function postHTML(post) {
             <div class="post-tags">${(post.categories || []).map(cat => `<span>${escapeHTML(cat.name)}</span>`).join("")}</div>
             <footer class="post-footer">
                 ${reactionButtons(post, "post")}
-                <button class="comments-link" data-open-comments="${post.id}"><span aria-hidden="true">◯</span> ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}</button>
+                <button class="comments-link" data-open-comments="${post.id}">${icon("message")} ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}</button>
             </footer>
         </div>
         <section class="post-comments" id="comments-${post.id}" hidden>
@@ -62,7 +83,6 @@ function postHTML(post) {
                 <textarea id="comment-input-${post.id}" maxlength="1000" placeholder="Join the conversation…" rows="2"></textarea>
                 <button class="primary-btn compact" type="submit">Reply</button>
             </form>
-            <p class="form-error" id="comment-error-${post.id}"></p>
         </section>
     </article>`;
 }
@@ -75,16 +95,24 @@ function commentHTML(comment) {
     </div>`;
 }
 
-async function loadPosts() {
+async function loadPosts({ announce = false, showSkeleton = true } = {}) {
     const container = document.getElementById("posts-container");
     if (!container) return;
-    container.innerHTML = `<div class="loading-state">Loading conversations…</div>`;
+    const refreshButton = document.getElementById("refresh-feed");
+    if (showSkeleton) container.innerHTML = `<div class="post-skeleton"><i></i><i></i><i></i></div><div class="post-skeleton"><i></i><i></i><i></i></div>`;
+    setButtonLoading(refreshButton, true, "Refreshing…");
     try {
         const posts = await api.getPosts(filters);
         container.innerHTML = posts.length ? posts.map(postHTML).join("") :
             `<div class="empty-state"><strong>No posts here yet</strong><span>Start a conversation with the community.</span></div>`;
+        lastRefreshedAt = new Date();
+        const stamp = document.getElementById("refresh-stamp");
+        if (stamp) stamp.textContent = `Updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(lastRefreshedAt)}`;
+        if (announce) notify("The latest discussions are now visible.", "success", "Feed refreshed");
     } catch (error) {
-        container.innerHTML = `<div class="empty-state error">Could not load posts.</div>`;
+        handleRequestError(error, "Could not load posts");
+    } finally {
+        setButtonLoading(refreshButton, false);
     }
 }
 
@@ -106,21 +134,28 @@ async function toggleComments(postId) {
             : `<p class="empty-comments">No comments yet. Be the first to reply.</p>`;
         section.dataset.loaded = "true";
     } catch {
-        document.getElementById(`comment-error-${postId}`).textContent = "Comments could not be loaded.";
+        notify("Comments could not be loaded.", "error");
     }
 }
 
 async function sendComment(form) {
     const postId = Number(form.dataset.postId);
     const input = document.getElementById(`comment-input-${postId}`);
-    const error = document.getElementById(`comment-error-${postId}`);
-    error.textContent = "";
-    if (!input.value.trim()) return;
+    if (!input.value.trim()) {
+        notify("Write a comment before replying.", "error", "Comment is empty");
+        return;
+    }
     try {
         await api.createComment({ postId, content: input.value.trim() });
         input.value = "";
+        const post = await api.getPost(postId);
+        const list = document.getElementById(`comments-list-${postId}`);
+        list.innerHTML = post.comments?.length ? post.comments.map(commentHTML).join("") : `<p class="empty-comments">No comments yet.</p>`;
+        const link = document.querySelector(`[data-post-id="${postId}"] .comments-link`);
+        if (link) link.innerHTML = `${icon("message")} ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}`;
+        notify("Your comment was added.", "success");
     } catch (err) {
-        error.textContent = err.message;
+        handleRequestError(err, "Comment failed");
     }
 }
 
@@ -142,7 +177,9 @@ async function react(button) {
                 card.querySelector(".comments-list").innerHTML = post.comments.map(commentHTML).join("");
             }
         }
-    } catch {}
+    } catch (error) {
+        handleRequestError(error, "Reaction failed");
+    }
 }
 
 function userItem(user) {
@@ -165,7 +202,9 @@ async function loadUsers() {
         const fresh = await api.getUsers();
         users = fresh.map(user => ({ ...user, unread: users.find(old => old.id === user.id)?.unread || 0 }));
         renderUsers();
-    } catch {}
+    } catch (error) {
+        handleRequestError(error, "Members could not load");
+    }
 }
 
 function chatMessageHTML(message) {
@@ -198,6 +237,7 @@ async function openChat(userId) {
     } catch (error) {
         hasMoreMessages = false;
         list.innerHTML = `<div class="chat-start"><strong>Messages could not load</strong><span>Please close this chat and try again.</span></div>`;
+        handleRequestError(error, "Messages could not load");
     } finally {
         loadingMessages = false;
     }
@@ -232,11 +272,17 @@ async function loadOlderMessages() {
 
 function sendChat() {
     const input = document.getElementById("chat-input");
-    const error = document.getElementById("chat-error");
-    error.textContent = "";
-    if (!activeChat || !activeChat.online || !input.value.trim()) return;
+    if (!activeChat) return;
+    if (!activeChat.online) {
+        notify(`${activeChat.nickname} is offline right now.`, "info", "Message not sent");
+        return;
+    }
+    if (!input.value.trim()) {
+        notify("Write a message before sending.", "error", "Message is empty");
+        return;
+    }
     if (!sendSocketMessage("chat_message", { receiverId: activeChat.id, content: input.value.trim() })) {
-        error.textContent = "Connecting… please try again.";
+        notify("Chat is reconnecting. Please try again in a moment.", "error", "Not connected");
         return;
     }
     input.value = "";
@@ -265,29 +311,7 @@ function bindSocketHandlers() {
     onSocketMessage("user_offline", data => updatePresence(data.userId, false));
     onSocketMessage("chat_message", receiveChatMessage);
     onSocketMessage("chat_error", data => {
-        const error = document.getElementById("chat-error");
-        if (error) error.textContent = data.message;
-    });
-    onSocketMessage("new_post", loadPosts);
-    onSocketMessage("new_comment", data => {
-        const section = document.getElementById(`comments-${data.postId}`);
-        if (section?.dataset.loaded) {
-            section.querySelector(".empty-comments")?.remove();
-            if (!section.querySelector(`[data-comment-id="${data.id}"]`)) section.querySelector(".comments-list").insertAdjacentHTML("beforeend", commentHTML(data));
-        }
-        const link = document.querySelector(`[data-post-id="${data.postId}"] .comments-link`);
-        if (link) {
-            const count = (Number(link.textContent.match(/\d+/)?.[0]) || 0) + 1;
-            link.innerHTML = `<span aria-hidden="true">◯</span> ${count} ${count === 1 ? "comment" : "comments"}`;
-        }
-    });
-    onSocketMessage("reaction_update", data => {
-        const container = document.querySelector(data.targetType === "post"
-            ? `[data-post-id="${data.targetId}"] .post-reactions`
-            : `[data-comment-id="${data.targetId}"] .comment-reactions`);
-        if (!container) return;
-        container.querySelector('[data-reaction="like"] span').textContent = data.likeCount;
-        container.querySelector('[data-reaction="dislike"] span').textContent = data.dislikeCount;
+        notify(data.message, "error", "Message not sent");
     });
 }
 
@@ -310,18 +334,33 @@ function bindEvents(navigateTo) {
     });
     document.getElementById("new-post-btn").addEventListener("click", () => document.getElementById("composer").classList.toggle("open"));
     document.getElementById("cancel-post").addEventListener("click", () => document.getElementById("composer").classList.remove("open"));
+    document.getElementById("refresh-feed").addEventListener("click", () => loadPosts({ announce: true, showSkeleton: false }));
     document.getElementById("submit-post").addEventListener("click", async () => {
         const content = document.getElementById("post-content");
         const selected = [...document.querySelectorAll("#create-category-checkboxes input:checked")].map(input => Number(input.value));
-        const error = document.getElementById("create-post-error");
-        error.textContent = "";
-        if (!content.value.trim() || !selected.length) return error.textContent = "Write something and choose at least one topic.";
+        const button = document.getElementById("submit-post");
+        if (!content.value.trim()) {
+            notify("Write something before publishing your post.", "error", "Post is empty");
+            content.focus();
+            return;
+        }
+        if (!selected.length) {
+            notify("Choose at least one topic for your post.", "error", "Topic required");
+            return;
+        }
+        setButtonLoading(button, true, "Publishing…");
         try {
             await api.createPost({ content: content.value.trim(), categoryIds: selected });
             content.value = "";
             document.querySelectorAll("#create-category-checkboxes input").forEach(input => input.checked = false);
             document.getElementById("composer").classList.remove("open");
-        } catch (err) { error.textContent = err.message; }
+            await loadPosts({ showSkeleton: false });
+            notify("Your post is now in the feed.", "success", "Post published");
+        } catch (error) {
+            handleRequestError(error, "Post could not be published");
+        } finally {
+            setButtonLoading(button, false);
+        }
     });
     document.getElementById("category-filter").addEventListener("click", event => {
         const button = event.target.closest("[data-filter]");
@@ -366,16 +405,18 @@ function bindEvents(navigateTo) {
 }
 
 export async function renderFeed(app, navigateTo) {
+    navigate = navigateTo;
     try {
         [me, categories] = await Promise.all([api.getMe(), api.getCategories()]);
-    } catch {
-        navigateTo("login");
+    } catch (error) {
+        if (error.status === 401) navigateTo("login");
+        else navigateTo("error", { status: error.status || 503, message: error.message });
         return;
     }
     app.innerHTML = `<div class="app-shell">
         <header class="topbar">
             <div class="brand"><span class="brand-mark">F</span><span><strong>Forum</strong><small>Community space</small></span></div>
-            <div class="top-actions"><button id="new-post-btn" class="primary-btn">＋ Create post</button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out">↗</button></div>
+            <div class="top-actions"><button id="new-post-btn" class="primary-btn">${icon("plus")} <span>Create post</span></button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out" aria-label="Log out">${icon("logout")}</button></div>
         </header>
         <main class="workspace">
             <aside class="people-panel">
@@ -383,23 +424,21 @@ export async function renderFeed(app, navigateTo) {
                 <div id="users-list" class="users-list"></div>
             </aside>
             <section class="feed-panel">
-                <div class="feed-heading"><div><p class="eyebrow">Community</p><h1>Latest discussions</h1><p>Share an idea, ask a question, or join the conversation.</p></div></div>
+                <div class="feed-heading"><div><p class="eyebrow">Community</p><h1>Latest discussions</h1><p>Share an idea, ask a question, or join the conversation.</p></div><div class="feed-refresh"><button id="refresh-feed" class="secondary-btn refresh-btn">${icon("refresh")} <span>Refresh</span></button><small id="refresh-stamp">Not refreshed yet</small></div></div>
                 <section id="composer" class="composer">
                     <textarea id="post-content" maxlength="5000" rows="4" placeholder="What would you like to discuss?"></textarea>
                     <div id="create-category-checkboxes" class="category-options">${categories.map(cat => `<label><input type="checkbox" value="${cat.id}"><span>${escapeHTML(cat.name)}</span></label>`).join("")}</div>
-                    <p id="create-post-error" class="form-error"></p>
-                    <div class="composer-actions"><button id="cancel-post" class="secondary-btn">Cancel</button><button id="submit-post" class="primary-btn">Publish post</button></div>
+                    <div class="composer-actions"><button id="cancel-post" class="secondary-btn">${icon("close")} Cancel</button><button id="submit-post" class="primary-btn">${icon("check")} Publish post</button></div>
                 </section>
                 <nav id="category-filter" class="filter-row" aria-label="Filter posts"></nav>
                 <div id="posts-container" class="posts"></div>
             </section>
             <aside class="chat-panel">
-                <div id="chat-empty" class="chat-empty"><span class="chat-illustration">✦</span><strong>Your messages</strong><p>Choose a member to open a private conversation.</p></div>
+                <div id="chat-empty" class="chat-empty"><span class="chat-illustration">${icon("message")}</span><strong>Your messages</strong><p>Choose a member to open a private conversation.</p></div>
                 <section id="chat-view" class="chat-view" hidden>
-                    <header class="chat-header"><div><strong id="chat-name"></strong><small id="chat-status"></small></div><button id="chat-close" class="icon-btn" aria-label="Close chat">×</button></header>
+                    <header class="chat-header"><div><strong id="chat-name"></strong><small id="chat-status"></small></div><button id="chat-close" class="icon-btn" aria-label="Close chat">${icon("close")}</button></header>
                     <div id="chat-messages" class="chat-messages"></div>
-                    <div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="1"></textarea><button id="chat-send" class="send-btn" aria-label="Send message">➤</button></div>
-                    <p id="chat-error" class="form-error chat-error"></p>
+                    <div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="1"></textarea><button id="chat-send" class="send-btn" aria-label="Send message">${icon("send")}</button></div>
                 </section>
             </aside>
         </main>

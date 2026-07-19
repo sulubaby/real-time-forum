@@ -7,7 +7,6 @@ import (
 	"real/database"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type CreatePostRequest struct {
@@ -83,22 +82,6 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	var nickname string
-	database.DB.QueryRow(`SELECT nickname FROM users WHERE id = ?`, userID).Scan(&nickname)
-
-	Broadcast("new_post", map[string]interface{}{
-		"id":           postID,
-		"userId":       userID,
-		"author":       nickname,
-		"content":      req.Content,
-		"createdAt":    time.Now().Format("2006-01-02 15:04:05"),
-		"categoryIds":  req.CategoryIDs,
-		"commentCount": 0,
-		"likeCount":    0,
-		"dislikeCount": 0,
-		"userReaction": "",
-	})
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{

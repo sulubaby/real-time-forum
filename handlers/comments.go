@@ -6,7 +6,6 @@ import (
 	"real/database"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type CreateCommentRequest struct {
@@ -60,23 +59,11 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var nickname string
-	database.DB.QueryRow(`SELECT nickname FROM users WHERE id = ?`, userID).Scan(&nickname)
-
-	Broadcast("new_comment", map[string]interface{}{
-		"id":           commentID,
-		"postId":       req.PostID,
-		"userId":       userID,
-		"author":       nickname,
-		"content":      req.Content,
-		"createdAt":    time.Now().Format("2006-01-02 15:04:05"),
-		"likeCount":    0,
-		"dislikeCount": 0,
-		"userReaction": "",
-	})
-
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Comment created"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Comment created",
+		"id":      commentID,
+	})
 }
 
 func GetCommentsHandler(w http.ResponseWriter, r *http.Request) {

@@ -76,17 +76,14 @@ func ToggleReactionHandler(w http.ResponseWriter, r *http.Request) {
 	database.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+idCol+" = ? AND reaction_type = 'like'", req.TargetID).Scan(&likeCount)
 	database.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+idCol+" = ? AND reaction_type = 'dislike'", req.TargetID).Scan(&dislikeCount)
 
-	Broadcast("reaction_update", map[string]interface{}{
-		"targetType":   req.TargetType,
-		"targetId":     req.TargetID,
-		"likeCount":    likeCount,
-		"dislikeCount": dislikeCount,
-	})
-
 	status := http.StatusOK
 	if action == "created" {
 		status = http.StatusCreated
 	}
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"action": action})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"action":       action,
+		"likeCount":    likeCount,
+		"dislikeCount": dislikeCount,
+	})
 }
