@@ -348,20 +348,6 @@ time { color: var(--faint); font: 400 10px var(--mono); margin-top: 2px; display
 #login-error, #reg-error { color: var(--danger) !important; white-space: pre-wrap; font-size: 12px; }
 
 /* ---------------------------------------------------------------
-   NOTIFICATIONS
---------------------------------------------------------------- */
-.toast-root { position: fixed; top: 82px; right: 18px; z-index: 1000; width: min(380px, calc(100vw - 28px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
-.toast { pointer-events: auto; display: grid; grid-template-columns: 36px 1fr 28px; gap: 11px; align-items: start; padding: 13px; background: rgba(255,255,255,.97); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow); animation: toast-in .22s ease-out; }
-.toast-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--surface-raised); color: var(--signal-text); }
-.toast-error .toast-icon { background: var(--danger-soft); color: var(--danger); }
-.toast strong { display: block; font-size: 13px; margin-bottom: 2px; }
-.toast p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
-.toast button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; background: transparent; color: var(--faint); border-radius: 7px; padding: 0; }
-.toast button:hover { background: var(--surface-raised); color: var(--text); }
-.toast-leaving { opacity: 0; transform: translateX(12px); transition: .18s ease; }
-@keyframes toast-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
-
-/* ---------------------------------------------------------------
    AUTHENTICATION
 --------------------------------------------------------------- */
 .auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(360px, .9fr) minmax(500px, 1.1fr); background: var(--surface); }
@@ -429,7 +415,6 @@ time { color: var(--faint); font: 400 10px var(--mono); margin-top: 2px; display
     .post-clickable { padding: 17px 16px 12px; }
     .post-comments { padding: 5px 16px 16px; }
     .auth-container .field-row { grid-template-columns: 1fr; }
-    .toast-root { top: 70px; right: 14px; }
     .auth-page { display: block; background: var(--bg); }
     .auth-brand-panel { display: none; }
     .auth-form-panel { min-height: 100vh; padding: 20px 14px; }

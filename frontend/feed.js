@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { connectSocket, disconnectSocket, onSocketMessage, sendSocketMessage } from "./ws.js";
-import { icon, notify, setButtonLoading } from "./ui.js";
+import { setButtonLoading } from "./ui.js";
 
 let me;
 let categories = [];
@@ -12,11 +12,6 @@ let loadingMessages = false;
 let socketHandlersBound = false;
 let navigate;
 let lastRefreshedAt = null;
-
-const icons = {
-    like: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v11H3V10h4Zm4.2 11H9V10l3.6-7c.4-.8 1.4-1.2 2.2-.8.7.3 1.1 1 1 1.8l-.7 4H20c1.1 0 2 .9 2 2l-1 8c-.2 1.7-1.7 3-3.5 3h-6.3Z"/></svg>`,
-    dislike: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14V3H3v11h4Zm4.2-11H9v11l3.6 7c.4.8 1.4 1.2 2.2.8.7-.3 1.1-1 1-1.8l-.7-4H20c1.1 0 2-.9 2-2l-1-8c-.2-1.7-1.7-3-3.5-3h-6.3Z"/></svg>`,
-};
 
 function escapeHTML(value = "") {
     const element = document.createElement("div");
@@ -52,14 +47,14 @@ function handleRequestError(error, title = "Request failed") {
         });
         return;
     }
-    notify(error?.message || "Please try again.", "error", title);
+    console.error(title, error);
 }
 
 function reactionButtons(item, type) {
     const idName = type === "post" ? "post-id" : "comment-id";
     return `<div class="${type}-reactions reactions">
-        <button class="reaction-btn ${item.userReaction === "like" ? "active" : ""}" data-reaction="like" data-${idName}="${item.id}" aria-label="Like">${icons.like}<span>${item.likeCount}</span></button>
-        <button class="reaction-btn ${item.userReaction === "dislike" ? "active dislike" : ""}" data-reaction="dislike" data-${idName}="${item.id}" aria-label="Dislike">${icons.dislike}<span>${item.dislikeCount}</span></button>
+        <button class="reaction-btn ${item.userReaction === "like" ? "active" : ""}" data-reaction="like" data-${idName}="${item.id}" aria-label="Like">Like <span>${item.likeCount}</span></button>
+        <button class="reaction-btn ${item.userReaction === "dislike" ? "active dislike" : ""}" data-reaction="dislike" data-${idName}="${item.id}" aria-label="Dislike">Dislike <span>${item.dislikeCount}</span></button>
     </div>`;
 }
 
@@ -74,7 +69,7 @@ function postHTML(post) {
             <div class="post-tags">${(post.categories || []).map(cat => `<span>${escapeHTML(cat.name)}</span>`).join("")}</div>
             <footer class="post-footer">
                 ${reactionButtons(post, "post")}
-                <button class="comments-link" data-open-comments="${post.id}">${icon("message")} ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}</button>
+                <button class="comments-link" data-open-comments="${post.id}">${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}</button>
             </footer>
         </div>
         <section class="post-comments" id="comments-${post.id}" hidden>
@@ -108,7 +103,6 @@ async function loadPosts({ announce = false, showSkeleton = true } = {}) {
         lastRefreshedAt = new Date();
         const stamp = document.getElementById("refresh-stamp");
         if (stamp) stamp.textContent = `Updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(lastRefreshedAt)}`;
-        if (announce) notify("The latest discussions are now visible.", "success", "Feed refreshed");
     } catch (error) {
         handleRequestError(error, "Could not load posts");
     } finally {
@@ -133,8 +127,8 @@ async function toggleComments(postId) {
             ? post.comments.map(commentHTML).join("")
             : `<p class="empty-comments">No comments yet. Be the first to reply.</p>`;
         section.dataset.loaded = "true";
-    } catch {
-        notify("Comments could not be loaded.", "error");
+    } catch (error) {
+        console.error("Comments could not be loaded", error);
     }
 }
 
@@ -142,7 +136,7 @@ async function sendComment(form) {
     const postId = Number(form.dataset.postId);
     const input = document.getElementById(`comment-input-${postId}`);
     if (!input.value.trim()) {
-        notify("Write a comment before replying.", "error", "Comment is empty");
+        input.focus();
         return;
     }
     try {
@@ -152,8 +146,7 @@ async function sendComment(form) {
         const list = document.getElementById(`comments-list-${postId}`);
         list.innerHTML = post.comments?.length ? post.comments.map(commentHTML).join("") : `<p class="empty-comments">No comments yet.</p>`;
         const link = document.querySelector(`[data-post-id="${postId}"] .comments-link`);
-        if (link) link.innerHTML = `${icon("message")} ${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}`;
-        notify("Your comment was added.", "success");
+        if (link) link.textContent = `${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}`;
     } catch (err) {
         handleRequestError(err, "Comment failed");
     }
@@ -274,15 +267,13 @@ function sendChat() {
     const input = document.getElementById("chat-input");
     if (!activeChat) return;
     if (!activeChat.online) {
-        notify(`${activeChat.nickname} is offline right now.`, "info", "Message not sent");
         return;
     }
     if (!input.value.trim()) {
-        notify("Write a message before sending.", "error", "Message is empty");
+        input.focus();
         return;
     }
     if (!sendSocketMessage("chat_message", { receiverId: activeChat.id, content: input.value.trim() })) {
-        notify("Chat is reconnecting. Please try again in a moment.", "error", "Not connected");
         return;
     }
     input.value = "";
@@ -311,7 +302,7 @@ function bindSocketHandlers() {
     onSocketMessage("user_offline", data => updatePresence(data.userId, false));
     onSocketMessage("chat_message", receiveChatMessage);
     onSocketMessage("chat_error", data => {
-        notify(data.message, "error", "Message not sent");
+        console.error("Message not sent", data.message);
     });
 }
 
@@ -340,12 +331,11 @@ function bindEvents(navigateTo) {
         const selected = [...document.querySelectorAll("#create-category-checkboxes input:checked")].map(input => Number(input.value));
         const button = document.getElementById("submit-post");
         if (!content.value.trim()) {
-            notify("Write something before publishing your post.", "error", "Post is empty");
             content.focus();
             return;
         }
         if (!selected.length) {
-            notify("Choose at least one topic for your post.", "error", "Topic required");
+            document.querySelector("#create-category-checkboxes input")?.focus();
             return;
         }
         setButtonLoading(button, true, "Publishing…");
@@ -355,7 +345,6 @@ function bindEvents(navigateTo) {
             document.querySelectorAll("#create-category-checkboxes input").forEach(input => input.checked = false);
             document.getElementById("composer").classList.remove("open");
             await loadPosts({ showSkeleton: false });
-            notify("Your post is now in the feed.", "success", "Post published");
         } catch (error) {
             handleRequestError(error, "Post could not be published");
         } finally {
@@ -416,7 +405,7 @@ export async function renderFeed(app, navigateTo) {
     app.innerHTML = `<div class="app-shell">
         <header class="topbar">
             <div class="brand"><span class="brand-mark">F</span><span><strong>Forum</strong><small>Community space</small></span></div>
-            <div class="top-actions"><button id="new-post-btn" class="primary-btn">${icon("plus")} <span>Create post</span></button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out" aria-label="Log out">${icon("logout")}</button></div>
+            <div class="top-actions"><button id="new-post-btn" class="primary-btn"><span>Create post</span></button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out" aria-label="Log out">Log out</button></div>
         </header>
         <main class="workspace">
             <aside class="people-panel">
@@ -424,21 +413,21 @@ export async function renderFeed(app, navigateTo) {
                 <div id="users-list" class="users-list"></div>
             </aside>
             <section class="feed-panel">
-                <div class="feed-heading"><div><p class="eyebrow">Community</p><h1>Latest discussions</h1><p>Share an idea, ask a question, or join the conversation.</p></div><div class="feed-refresh"><button id="refresh-feed" class="secondary-btn refresh-btn">${icon("refresh")} <span>Refresh</span></button><small id="refresh-stamp">Not refreshed yet</small></div></div>
+                <div class="feed-heading"><div><p class="eyebrow">Community</p><h1>Latest discussions</h1><p>Share an idea, ask a question, or join the conversation.</p></div><div class="feed-refresh"><button id="refresh-feed" class="secondary-btn refresh-btn"><span>Refresh</span></button><small id="refresh-stamp">Not refreshed yet</small></div></div>
                 <section id="composer" class="composer">
                     <textarea id="post-content" maxlength="5000" rows="4" placeholder="What would you like to discuss?"></textarea>
                     <div id="create-category-checkboxes" class="category-options">${categories.map(cat => `<label><input type="checkbox" value="${cat.id}"><span>${escapeHTML(cat.name)}</span></label>`).join("")}</div>
-                    <div class="composer-actions"><button id="cancel-post" class="secondary-btn">${icon("close")} Cancel</button><button id="submit-post" class="primary-btn">${icon("check")} Publish post</button></div>
+                    <div class="composer-actions"><button id="cancel-post" class="secondary-btn">Cancel</button><button id="submit-post" class="primary-btn">Publish post</button></div>
                 </section>
                 <nav id="category-filter" class="filter-row" aria-label="Filter posts"></nav>
                 <div id="posts-container" class="posts"></div>
             </section>
             <aside class="chat-panel">
-                <div id="chat-empty" class="chat-empty"><span class="chat-illustration">${icon("message")}</span><strong>Your messages</strong><p>Choose a member to open a private conversation.</p></div>
+                <div id="chat-empty" class="chat-empty"><strong>Your messages</strong><p>Choose a member to open a private conversation.</p></div>
                 <section id="chat-view" class="chat-view" hidden>
-                    <header class="chat-header"><div><strong id="chat-name"></strong><small id="chat-status"></small></div><button id="chat-close" class="icon-btn" aria-label="Close chat">${icon("close")}</button></header>
+                    <header class="chat-header"><div><strong id="chat-name"></strong><small id="chat-status"></small></div><button id="chat-close" class="icon-btn" aria-label="Close chat">Close</button></header>
                     <div id="chat-messages" class="chat-messages"></div>
-                    <div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="1"></textarea><button id="chat-send" class="send-btn" aria-label="Send message">${icon("send")}</button></div>
+                    <div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="1"></textarea><button id="chat-send" class="send-btn" aria-label="Send message">Send</button></div>
                 </section>
             </aside>
         </main>

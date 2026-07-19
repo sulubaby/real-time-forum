@@ -1,13 +1,12 @@
 import { api } from "./api.js";
 import { navigateTo } from "./router.js";
-import { notify } from "./ui.js";
 
 window.addEventListener("error", event => {
-    if (event.message) notify("An unexpected interface error occurred. Please retry the action.", "error", "Interface error");
+    if (event.message) console.error(event.message);
 });
 
-window.addEventListener("unhandledrejection", () => {
-    notify("A request could not be completed. Please try again.", "error", "Unexpected error");
+window.addEventListener("unhandledrejection", event => {
+    console.error(event.reason);
 });
 
 document.addEventListener("DOMContentLoaded", async () => {

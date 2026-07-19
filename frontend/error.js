@@ -1,5 +1,3 @@
-import { icon } from "./ui.js";
-
 export function renderError(app, navigateTo, details = {}) {
     const status = Number(details.status) || 500;
     const isNotFound = status === 404;
@@ -15,8 +13,8 @@ export function renderError(app, navigateTo, details = {}) {
             <h1>${title}</h1>
             <p class="error-description" id="error-description"></p>
             <div class="error-actions">
-                <button id="error-home" class="primary-btn">${icon("arrowLeft")} Back to forum</button>
-                <button id="error-retry" class="secondary-btn">${icon("refresh")} Try again</button>
+                <button id="error-home" class="primary-btn">Back to forum</button>
+                <button id="error-retry" class="secondary-btn">Try again</button>
             </div>
         </section>
     </main>`;

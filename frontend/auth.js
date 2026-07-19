@@ -1,12 +1,12 @@
 import { api } from "./api.js";
-import { icon, notify, setButtonLoading } from "./ui.js";
+import { setButtonLoading } from "./ui.js";
 
 function authShell(title, subtitle, form, footer) {
     return `<main class="auth-page">
         <section class="auth-brand-panel">
             <div class="auth-brand"><span class="brand-mark">F</span><strong>Forum</strong></div>
             <div><p class="eyebrow">A place to belong</p><h1>Ideas become better through conversation.</h1><p>Meet the community, share what you know, and keep every discussion moving.</p></div>
-            <div class="auth-feature-list"><span>${icon("message")} Real-time private chat</span><span>${icon("user")} Community discussions</span><span>${icon("check")} Simple and focused</span></div>
+            <div class="auth-feature-list"><span>Real-time private chat</span><span>Community discussions</span><span>Simple and focused</span></div>
         </section>
         <section class="auth-form-panel">
             <div class="auth-form-card"><div class="mobile-auth-brand"><span class="brand-mark">F</span><strong>Forum</strong></div><p class="eyebrow">Welcome</p><h2>${title}</h2><p class="auth-subtitle">${subtitle}</p>${form}<p class="auth-switch">${footer}</p></div>
@@ -38,19 +38,16 @@ export function renderLogin(app, navigateTo) {
         const identifier = document.getElementById("login-identifier").value.trim();
         const password = document.getElementById("login-password").value;
         if (!identifier || !password) {
-            notify("Enter both your nickname or email and your password.", "error", "Missing information");
+            event.currentTarget.reportValidity();
             return;
         }
         setButtonLoading(button, true, "Signing in…");
         try {
             await api.login({ identifier, password });
-            notify("You are signed in.", "success", "Welcome back");
             navigateTo("feed");
         } catch (error) {
             if (error.status >= 500 || error.status === 0) {
                 navigateTo("error", { status: error.status || 503, message: error.message });
-            } else {
-                notify(error.message, "error", "Sign in failed");
             }
         } finally {
             setButtonLoading(button, false);
@@ -85,7 +82,6 @@ export function renderRegister(app, navigateTo) {
         const button = form.querySelector("button[type=submit]");
         if (!form.checkValidity()) {
             form.reportValidity();
-            notify("Please complete every field with valid information.", "error", "Check your details");
             return;
         }
         const userData = {
@@ -100,13 +96,10 @@ export function renderRegister(app, navigateTo) {
         setButtonLoading(button, true, "Creating account…");
         try {
             await api.register(userData);
-            notify("Your account is ready. You can sign in now.", "success", "Account created");
             navigateTo("login");
         } catch (error) {
             if (error.status >= 500 || error.status === 0) {
                 navigateTo("error", { status: error.status || 503, message: error.message });
-            } else {
-                notify(error.message, "error", "Registration failed");
             }
         } finally {
             setButtonLoading(button, false);
