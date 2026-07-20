@@ -327,6 +327,30 @@ function updatePresence(id, online) {
     renderUsers();
 }
 
+function throttle(callback, wait = 250) {
+    let lastCall = 0;
+    let timeoutId = null;
+
+    return (...args) => {
+        const now = Date.now();
+        const remaining = wait - (now - lastCall);
+
+        if (remaining <= 0) {
+            lastCall = now;
+            callback(...args);
+            return;
+        }
+
+        if (!timeoutId) {
+            timeoutId = setTimeout(() => {
+                timeoutId = null;
+                lastCall = Date.now();
+                callback(...args);
+            }, remaining);
+        }
+    };
+}
+
 function bindEvents(navigateTo) {
     document.getElementById("logout-btn").addEventListener("click", async () => {
         disconnectSocket();
@@ -398,9 +422,13 @@ function bindEvents(navigateTo) {
         if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendChat(); }
     });
     let scrollFrame;
+    const throttledLoadOlderMessages = throttle(() => loadOlderMessages(), 250);
     document.getElementById("chat-messages").addEventListener("scroll", () => {
         if (scrollFrame) return;
-        scrollFrame = requestAnimationFrame(() => { scrollFrame = null; loadOlderMessages(); });
+        scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = null;
+            throttledLoadOlderMessages();
+        });
     });
 }
 

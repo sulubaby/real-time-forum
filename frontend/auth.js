@@ -3,6 +3,9 @@ import { icon, notify, setButtonLoading } from "./ui.js";
 
 function authShell(title, subtitle, form, footer) {
     return `<main class="auth-page">
+        <header class="auth-topbar">
+            <button id="auth-logout-btn" class="icon-btn" title="Log out" aria-label="Log out">${icon("logout")}</button>
+        </header>
         <section class="auth-brand-panel">
             <div class="auth-brand"><span class="brand-mark">F</span><strong>Forum</strong></div>
             <div><p class="eyebrow">A place to belong</p><h1>Ideas become better through conversation.</h1><p>Meet the community, share what you know, and keep every discussion moving.</p></div>
@@ -31,6 +34,13 @@ export function renderLogin(app, navigateTo) {
     document.getElementById("go-register").addEventListener("click", event => {
         event.preventDefault();
         navigateTo("register");
+    });
+    document.getElementById("auth-logout-btn").addEventListener("click", async () => {
+        try {
+            await api.logout();
+        } finally {
+            navigateTo("login");
+        }
     });
     document.getElementById("login-form").addEventListener("submit", async event => {
         event.preventDefault();
@@ -78,6 +88,13 @@ export function renderRegister(app, navigateTo) {
     document.getElementById("go-login").addEventListener("click", event => {
         event.preventDefault();
         navigateTo("login");
+    });
+    document.getElementById("auth-logout-btn").addEventListener("click", async () => {
+        try {
+            await api.logout();
+        } finally {
+            navigateTo("login");
+        }
     });
     document.getElementById("register-form").addEventListener("submit", async event => {
         event.preventDefault();

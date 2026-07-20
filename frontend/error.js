@@ -1,4 +1,5 @@
 import { icon } from "./ui.js";
+import { api } from "./api.js";
 
 export function renderError(app, navigateTo, details = {}) {
     const status = Number(details.status) || 500;
@@ -17,10 +18,18 @@ export function renderError(app, navigateTo, details = {}) {
             <div class="error-actions">
                 <button id="error-home" class="primary-btn">${icon("arrowLeft")} Back to forum</button>
                 <button id="error-retry" class="secondary-btn">${icon("refresh")} Try again</button>
+                <button id="error-logout" class="secondary-btn">${icon("logout")} Log out</button>
             </div>
         </section>
     </main>`;
     document.getElementById("error-description").textContent = message;
     document.getElementById("error-home").addEventListener("click", () => navigateTo(details.authenticated ? "feed" : "login"));
     document.getElementById("error-retry").addEventListener("click", () => window.location.reload());
+    document.getElementById("error-logout").addEventListener("click", async () => {
+        try {
+            await api.logout();
+        } finally {
+            navigateTo("login");
+        }
+    });
 }
