@@ -36,8 +36,6 @@ func (r *bufferedResponse) Write(data []byte) (int, error) {
 	return r.body.Write(data)
 }
 
-// APIHandler gives every HTTP API endpoint the same JSON error shape and
-// prevents unexpected panics from leaking implementation details to clients.
 func APIHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		buffered := newBufferedResponse()
