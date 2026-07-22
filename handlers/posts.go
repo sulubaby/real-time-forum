@@ -7,6 +7,7 @@ import (
 	"real/database"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type CreatePostRequest struct {
@@ -44,6 +45,10 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(req.Content) == "" {
 		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if utf8.RuneCountInString(req.Content) > 5000 {
+		http.Error(w, "Post must be under 5000 characters", http.StatusBadRequest)
 		return
 	}
 	if len(req.CategoryIDs) == 0 {

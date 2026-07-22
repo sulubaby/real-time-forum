@@ -6,6 +6,7 @@ import (
 	"real/database"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type CreateCommentRequest struct {
@@ -41,6 +42,10 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(req.Content) == "" {
 		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if utf8.RuneCountInString(req.Content) > 1000 {
+		http.Error(w, "Comment must be under 1000 characters", http.StatusBadRequest)
 		return
 	}
 

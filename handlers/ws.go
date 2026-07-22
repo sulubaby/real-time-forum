@@ -24,9 +24,67 @@ func (c *Client) writeJSON(v interface{}) error {
 }
 
 var (
-	clients   = make(map[int]*Client)
-	clientsMu sync.RWMutex
+	clients     = make(map[int]*Client)
+	clientsMu   sync.RWMutex
+	chatRates   = make(map[int]*chatRateState)
+	chatRatesMu sync.Mutex
 )
+
+const (
+	chatBurstWindow = 10 * time.Second
+	chatBurstLimit  = 5
+	violationWindow = time.Minute
+	cooldownPeriod  = 3 * time.Second
+)
+
+type chatRateState struct {
+	sent          []time.Time
+	violations    []time.Time
+	cooldownUntil time.Time
+}
+
+func checkChatRateLimit(userID int, now time.Time) (bool, string) {
+	chatRatesMu.Lock()
+	defer chatRatesMu.Unlock()
+
+	state := chatRates[userID]
+	if state == nil {
+		state = &chatRateState{}
+		chatRates[userID] = state
+	}
+	if now.Before(state.cooldownUntil) {
+		remaining := state.cooldownUntil.Sub(now).Round(time.Second)
+		if remaining < time.Second {
+			remaining = time.Second
+		}
+		return false, "You're sending messages too quickly. Try again in " + remaining.String()
+	}
+
+	cutoff := now.Add(-chatBurstWindow)
+	state.sent = trimTimes(state.sent, cutoff)
+	state.violations = trimTimes(state.violations, now.Add(-violationWindow))
+	if len(state.sent) >= chatBurstLimit {
+		state.violations = append(state.violations, now)
+		if len(state.violations) >= 3 {
+			state.cooldownUntil = now.Add(cooldownPeriod)
+			state.sent = nil
+			state.violations = nil
+			return false, "Messaging is paused for 3 seconds because of repeated spam."
+		}
+		return false, "Please wait a moment before sending another message."
+	}
+
+	state.sent = append(state.sent, now)
+	return true, ""
+}
+
+func trimTimes(values []time.Time, cutoff time.Time) []time.Time {
+	first := 0
+	for first < len(values) && values[first].Before(cutoff) {
+		first++
+	}
+	return values[first:]
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -154,6 +212,10 @@ func HandleIncomingMessage(senderID int, msg WSMessage) {
 		}
 		if !IsUserOnline(incoming.ReceiverID) {
 			SendToUser(senderID, "chat_error", map[string]string{"message": "This user is currently offline"})
+			return
+		}
+		if allowed, message := checkChatRateLimit(senderID, time.Now()); !allowed {
+			SendToUser(senderID, "chat_error", map[string]string{"message": message})
 			return
 		}
 

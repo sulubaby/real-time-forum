@@ -28,6 +28,19 @@ function initials(name = "") {
     return name.slice(0, 2).toUpperCase();
 }
 
+function sortUsers() {
+    users.sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        const aHasMessages = Boolean(a.lastMessage);
+        const bHasMessages = Boolean(b.lastMessage);
+        if (aHasMessages && bHasMessages && a.lastMessage !== b.lastMessage) {
+            return b.lastMessage.localeCompare(a.lastMessage);
+        }
+        if (aHasMessages !== bHasMessages) return aHasMessages ? -1 : 1;
+        return a.nickname.localeCompare(b.nickname, undefined, { sensitivity: "base" });
+    });
+}
+
 function date(value, compact = false) {
     if (!value) return "";
     const parsed = new Date(value.replace(" ", "T"));
@@ -68,7 +81,7 @@ function postHTML(post) {
         <div class="post-clickable">
             <header class="post-header">
                 <span class="avatar">${initials(post.author)}</span>
-                <div><strong>${escapeHTML(post.author)}</strong><time>${date(post.createdAt)}</time></div>
+                <div><strong title="${escapeHTML(post.author)}">${escapeHTML(post.author)}</strong><time>${date(post.createdAt)}</time></div>
             </header>
             <p class="post-content">${escapeHTML(post.content)}</p>
             <div class="post-tags">${(post.categories || []).map(cat => `<span>${escapeHTML(cat.name)}</span>`).join("")}</div>
@@ -89,7 +102,7 @@ function postHTML(post) {
 
 function commentHTML(comment) {
     return `<div class="comment" data-comment-id="${comment.id}">
-        <div class="comment-line"><strong>${escapeHTML(comment.author)}</strong><time>${date(comment.createdAt)}</time></div>
+        <div class="comment-line"><strong title="${escapeHTML(comment.author)}">${escapeHTML(comment.author)}</strong><time>${date(comment.createdAt)}</time></div>
         <p>${escapeHTML(comment.content)}</p>
         ${reactionButtons(comment, "comment")}
     </div>`;
@@ -186,7 +199,7 @@ function userItem(user) {
     const unread = user.unread || 0;
     return `<button class="user-item ${user.online ? "online" : ""} ${activeChat?.id === user.id ? "selected" : ""}" data-user-id="${user.id}">
         <span class="avatar">${initials(user.nickname)}<i></i></span>
-        <span class="user-copy"><strong>${escapeHTML(user.nickname)}</strong><small>${user.online ? "Online" : "Offline"}</small></span>
+        <span class="user-copy"><strong title="${escapeHTML(user.nickname)}">${escapeHTML(user.nickname)}</strong><small>${user.online ? "Online" : "Offline"}</small></span>
         ${unread ? `<b class="unread">${unread}</b>` : ""}
     </button>`;
 }
@@ -194,6 +207,7 @@ function userItem(user) {
 function renderUsers() {
     const list = document.getElementById("users-list");
     if (!list) return;
+    sortUsers();
     list.innerHTML = users.length ? users.map(userItem).join("") : `<p class="empty-users">No other members yet.</p>`;
 }
 
@@ -201,6 +215,7 @@ async function loadUsers() {
     try {
         const fresh = await api.getUsers();
         users = fresh.map(user => ({ ...user, unread: users.find(old => old.id === user.id)?.unread || 0 }));
+        sortUsers();
         renderUsers();
     } catch (error) {
         handleRequestError(error, "Members could not load");
@@ -222,6 +237,7 @@ async function openChat(userId) {
     document.getElementById("chat-empty").hidden = true;
     document.getElementById("chat-view").hidden = false;
     document.getElementById("chat-name").textContent = activeChat.nickname;
+    document.getElementById("chat-name").title = activeChat.nickname;
     document.getElementById("chat-status").textContent = activeChat.online ? "Online now" : "Offline";
     updateChatComposer();
     const list = document.getElementById("chat-messages");
@@ -294,7 +310,7 @@ function receiveChatMessage(message) {
     if (user) {
         user.lastMessage = message.createdAt;
         if (activeChat?.id !== otherId && message.senderId !== me.id) user.unread = (user.unread || 0) + 1;
-        users.sort((a, b) => (b.lastMessage || "").localeCompare(a.lastMessage || "") || a.nickname.localeCompare(b.nickname));
+        sortUsers();
         renderUsers();
     }
     if (activeChat?.id !== otherId) return;
@@ -324,6 +340,7 @@ function updatePresence(id, online) {
         document.getElementById("chat-status").textContent = online ? "Online now" : "Offline";
         updateChatComposer();
     }
+    sortUsers();
     renderUsers();
 }
 
@@ -443,8 +460,8 @@ export async function renderFeed(app, navigateTo) {
     }
     app.innerHTML = `<div class="app-shell">
         <header class="topbar">
-            <div class="brand"><span class="brand-mark">F</span><span><strong>Forum</strong><small>Community space</small></span></div>
-            <div class="top-actions"><button id="new-post-btn" class="primary-btn">${icon("plus")} <span>Create post</span></button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out" aria-label="Log out">${icon("logout")}</button></div>
+            <div class="brand"><strong>Real-Time Forum</strong><small>Community space</small></div>
+            <div class="top-actions"><button id="new-post-btn" class="primary-btn">${icon("plus")} <span>Create post</span></button><span class="profile-avatar">${initials(me.nickname)}</span><span class="profile-name" title="${escapeHTML(me.nickname)}">${escapeHTML(me.nickname)}</span><button id="logout-btn" class="icon-btn" title="Log out" aria-label="Log out">${icon("logout")}</button></div>
         </header>
         <main class="workspace">
             <aside class="people-panel">

@@ -41,7 +41,7 @@ func generateSessionToken() (string, error) {
 func writeJSON(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(`{"message": "` + msg + `"}`))
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": msg})
 }
 
 func isValidEmail(email string) bool {
@@ -69,6 +69,9 @@ func validateRegister(req RegisterRequest) string {
 	}
 	if strings.TrimSpace(req.FirstName) == "" || strings.TrimSpace(req.LastName) == "" {
 		return "First and last name are required"
+	}
+	if utf8.RuneCountInString(req.FirstName) > 15 || utf8.RuneCountInString(req.LastName) > 15 {
+		return "First and last names must be 15 characters or fewer"
 	}
 	if !nameRegex.MatchString(req.FirstName) || !nameRegex.MatchString(req.LastName) {
 		return "Names can only contain English letters"
@@ -101,6 +104,10 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
+	req.Nickname = strings.TrimSpace(req.Nickname)
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.Email = strings.TrimSpace(req.Email)
 
 	if msg := validateRegister(req); msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)

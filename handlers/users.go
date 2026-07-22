@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"real/database"
+	"sort"
+	"strings"
 )
 
 type UserListItem struct {
@@ -27,10 +29,7 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 				   OR (sender_id = u.id AND receiver_id = ?)), '') as last_message
 		FROM users u
 		WHERE u.id != ?
-		ORDER BY
-			CASE WHEN last_message != '' THEN 0 ELSE 1 END,
-			last_message DESC,
-			u.nickname ASC
+		ORDER BY u.nickname COLLATE NOCASE ASC
 	`, currentUser, currentUser, currentUser)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -51,6 +50,23 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 		users = append(users, u)
 	}
+
+	sort.SliceStable(users, func(i, j int) bool {
+		left, right := users[i], users[j]
+		if left.Online != right.Online {
+			return left.Online
+		}
+		if left.LastMessage != "" && right.LastMessage != "" && left.LastMessage != right.LastMessage {
+			return left.LastMessage > right.LastMessage
+		}
+		if left.LastMessage != "" && right.LastMessage == "" {
+			return true
+		}
+		if left.LastMessage == "" && right.LastMessage != "" {
+			return false
+		}
+		return strings.ToLower(left.Nickname) < strings.ToLower(right.Nickname)
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
